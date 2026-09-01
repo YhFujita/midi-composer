@@ -67,4 +67,16 @@ describe('MML Parser', () => {
     expect(notes[0].startTime).toBe(0);
     expect(notes[1].startTime).toBe(2.0); // c4 (1.0) + r4 (1.0) = 2.0
   });
+
+  it('Voice(n) およびブロックコメント付きの楽器指定が正しく認識されること', () => {
+    const code = 'TR(1) Voice(48) /* ストリングス */ c4 d4\nTR(2) Voice(73) /* フルート */ e4 f4';
+    const result = parseMML(code);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.tracks).toHaveLength(2);
+    expect(result.tracks[0].instrument).toBe(48);
+    expect(result.tracks[0].notes).toHaveLength(2);
+    expect(result.tracks[1].instrument).toBe(73);
+    expect(result.tracks[1].notes).toHaveLength(2);
+  });
 });

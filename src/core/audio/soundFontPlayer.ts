@@ -409,6 +409,37 @@ export class AudioEngine {
 
     return await offlineCtx.startRendering();
   }
+
+  /**
+   * 楽器の音色確認用の短いプレビュー演奏 (C4, E4, G4 の分散和音)
+   */
+  public previewInstrument(instrument: number) {
+    const ctx = this.initAudioContext();
+    const now = ctx.currentTime;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.5, now);
+    masterGain.connect(ctx.destination);
+
+    // C4 (60), E4 (64), G4 (67) を軽くアルペジオ演奏
+    const notes = [
+      { midi: 60, offset: 0, dur: 0.35 },
+      { midi: 64, offset: 0.15, dur: 0.35 },
+      { midi: 67, offset: 0.3, dur: 0.6 },
+    ];
+
+    notes.forEach((n) => {
+      const dummyNote: NoteEvent = {
+        pitch: 'C',
+        midiNote: n.midi,
+        startTime: 0,
+        duration: 1,
+        velocity: 100,
+        trackId: 0,
+        channel: 1,
+      };
+      this.scheduleNote(ctx, dummyNote, instrument, now + n.offset, n.dur, masterGain);
+    });
+  }
 }
 
 export const audioEngine = new AudioEngine();

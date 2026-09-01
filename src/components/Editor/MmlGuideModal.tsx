@@ -98,6 +98,16 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
               </div>
             </div>
           </div>
+
+          {/* 楽器選択パレット・出力機能のご案内 */}
+          <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl text-xs">
+            <h4 className="font-semibold text-blue-300 flex items-center gap-1.5 mb-1.5">
+              💡 楽器選択パレット &amp; 入力場所への出力
+            </h4>
+            <p className="text-slate-300 leading-relaxed">
+              エディタ上部の「<strong>楽器選択ボタン</strong>」を押すと、全128音色のGM楽器パレットが開きます。音色をプレビュー試聴し、「<strong>出力</strong>」ボタンまたは上部ツールバーの「<strong>現在の入力場所へ出力</strong>」を押すことで、現在のカーソル位置へ構文ミスなく自動整形されて挿入されます。
+            </p>
+          </div>
         </div>
 
         {/* モーダルフッター */}
