@@ -6,6 +6,7 @@ export interface NoteEvent {
   velocity: number;    // 0 - 127
   trackId: number;     // 0, 1, ...
   channel: number;     // 1 - 16
+  instrument?: number; // GM音色番号 (0-127)
   isChord?: boolean;   // 和音の一部か
   line?: number;       // ソース行番号
   column?: number;     // ソース列番号

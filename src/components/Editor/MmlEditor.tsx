@@ -164,45 +164,70 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
         selection = new monacoRef.current.Selection(lastLine, lastCol, lastLine, lastCol);
       }
 
-      const startPos = selection.getStartPosition();
-      const endPos = selection.getEndPosition();
+      let targetRange = selection;
+      let textToInsert = baseCode;
 
-      // 構文エラー防止のためのスマートスペーシング処理
-      // 1. 直前の文字チェック: 空白・改行でなければ手前に半角スペースを付加
-      let prefix = '';
-      if (startPos.column > 1) {
-        const charBefore = model.getValueInRange({
-          startLineNumber: startPos.line,
-          startColumn: startPos.column - 1,
-          endLineNumber: startPos.line,
-          endColumn: startPos.column,
-        });
-        if (charBefore && !/\s/.test(charBefore)) {
-          prefix = ' ';
+      // 選択範囲が空（単なるカーソル）の場合、現在の行内に既存の Voice コマンドがあるか検査
+      if (selection.isEmpty()) {
+        const lineNumber = selection.startLineNumber;
+        const lineContent = model.getLineContent(lineNumber);
+
+        // 例: Voice(0), Voice(48) /* ... */, @0 などを検出
+        const voiceRegex = /(?:Voice|Program)\s*\(\s*\d+\s*\)(?:\s*\/\*.*?\*\/)?|@\s*\d+/i;
+        const match = lineContent.match(voiceRegex);
+
+        if (match && match.index !== undefined) {
+          const matchStartCol = match.index + 1;
+          const matchEndCol = matchStartCol + match[0].length;
+
+          // カーソルがその行にある場合は、既存の Voice コマンドを置換対象にする
+          targetRange = new monacoRef.current.Range(
+            lineNumber,
+            matchStartCol,
+            lineNumber,
+            matchEndCol
+          );
+          textToInsert = baseCode;
+        } else {
+          // 既存のVoiceがない場合は、カーソル前後のスマートスペーシング
+          const startPos = selection.getStartPosition();
+          const endPos = selection.getEndPosition();
+
+          let prefix = '';
+          if (startPos.column > 1) {
+            const charBefore = model.getValueInRange({
+              startLineNumber: startPos.line,
+              startColumn: startPos.column - 1,
+              endLineNumber: startPos.line,
+              endColumn: startPos.column,
+            });
+            if (charBefore && !/\s/.test(charBefore)) {
+              prefix = ' ';
+            }
+          }
+
+          let suffix = '';
+          const lineMaxCol = model.getLineMaxColumn(endPos.line);
+          if (endPos.column < lineMaxCol) {
+            const charAfter = model.getValueInRange({
+              startLineNumber: endPos.line,
+              startColumn: endPos.column,
+              endLineNumber: endPos.line,
+              endColumn: endPos.column + 1,
+            });
+            if (charAfter && !/\s/.test(charAfter)) {
+              suffix = ' ';
+            }
+          }
+
+          textToInsert = prefix + baseCode + suffix;
         }
       }
-
-      // 2. 直後の文字チェック: 空白・改行でなければ後ろに半角スペースを付加
-      let suffix = '';
-      const lineMaxCol = model.getLineMaxColumn(endPos.line);
-      if (endPos.column < lineMaxCol) {
-        const charAfter = model.getValueInRange({
-          startLineNumber: endPos.line,
-          startColumn: endPos.column,
-          endLineNumber: endPos.line,
-          endColumn: endPos.column + 1,
-        });
-        if (charAfter && !/\s/.test(charAfter)) {
-          suffix = ' ';
-        }
-      }
-
-      const textToInsert = prefix + baseCode + suffix;
 
       // Monaco Editor の executeEdits でテキストを挿入/置換
       editor.executeEdits('instrument-output', [
         {
-          range: selection,
+          range: targetRange,
           text: textToInsert,
           forceMoveMarkers: true,
         },

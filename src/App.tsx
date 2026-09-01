@@ -59,16 +59,11 @@ export const App: React.FC = () => {
       alert('再生できる有効な音符がありません。MMLエディタを確認してください。');
       return;
     }
-    if (isPaused) {
-      audioEngine.resume();
-      setIsPlaying(true);
-      setIsPaused(false);
-    } else {
-      audioEngine.play(parsedScore, currentTimeSec);
-      setIsPlaying(true);
-      setIsPaused(false);
-    }
-  }, [parsedScore, isPaused, currentTimeSec]);
+    // 常に最新の parsedScore を渡して再生（編集した音色が確実に反映される）
+    audioEngine.play(parsedScore, currentTimeSec);
+    setIsPlaying(true);
+    setIsPaused(false);
+  }, [parsedScore, currentTimeSec]);
 
   // 一時停止
   const handlePause = useCallback(() => {
@@ -185,6 +180,12 @@ export const App: React.FC = () => {
     [handleStop]
   );
 
+  // MML編集ハンドラ (編集時は一時停止状態をリセットし、常に最新の編集内容で再生できるようにする)
+  const handleMmlChange = useCallback((newText: string) => {
+    setMmlText(newText);
+    setIsPaused(false);
+  }, []);
+
   // ショートカットキー (Ctrl+S で保存)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -232,7 +233,7 @@ export const App: React.FC = () => {
           <div className="flex-1 overflow-hidden">
             <MmlEditor
               value={mmlText}
-              onChange={setMmlText}
+              onChange={handleMmlChange}
               errors={parsedScore.errors}
             />
           </div>

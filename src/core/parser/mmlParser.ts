@@ -280,6 +280,7 @@ export function parseMML(mmlCode: string): ParsedScore {
                 velocity: currentTrack.velocity,
                 trackId: currentTrack.id,
                 channel: currentTrack.channel,
+                instrument: currentTrack.instrument,
                 isChord: true,
                 line: lineNumber,
                 column: col + 1,
@@ -337,6 +338,7 @@ export function parseMML(mmlCode: string): ParsedScore {
           velocity: currentTrack.velocity,
           trackId: currentTrack.id,
           channel: currentTrack.channel,
+          instrument: currentTrack.instrument,
           line: lineNumber,
           column: col + 1,
         });

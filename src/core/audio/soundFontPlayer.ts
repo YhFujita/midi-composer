@@ -127,69 +127,239 @@ export class AudioEngine {
     const freq = midiToFreq(note.midiNote);
     const vel = (note.velocity || 100) / 127;
 
-    // GM 音色番号に応じたサウンド生成
-    // 0-7: Piano, 24-31: Guitar, 32-39: Bass, 40-47: Strings, 56-63: Brass, 73-79: Flute/Pipe, 80-87: Synth Lead
+    // GM 音色番号に応じたサウンド生成 (全16ファミリー対応)
     let oscType: OscillatorType = 'triangle';
-    let filterFreq = 4000;
+    let filterFreq = 3500;
     let attack = 0.01;
     let decay = 0.3;
     let sustain = 0.4;
     let release = 0.2;
+    let isBrass = false;
 
     if (instrument >= 0 && instrument <= 7) {
-      // Piano 系
-      oscType = 'triangle';
+      // 0-7: Piano
+      if (instrument >= 4 && instrument <= 5) {
+        // Electric Piano (まろやかな Rhodes / DX7 系)
+        oscType = 'sine';
+        filterFreq = 2400;
+        attack = 0.005;
+        decay = 1.0;
+        sustain = 0.3;
+        release = 0.35;
+      } else if (instrument >= 6 && instrument <= 7) {
+        // Harpsichord / Clavinet (明るいチェンバロ)
+        oscType = 'sawtooth';
+        filterFreq = 4800;
+        attack = 0.002;
+        decay = 0.6;
+        sustain = 0.15;
+        release = 0.2;
+      } else {
+        // Acoustic Grand Piano
+        oscType = 'triangle';
+        filterFreq = 3600;
+        attack = 0.003;
+        decay = 0.9;
+        sustain = 0.1;
+        release = 0.3;
+      }
+    } else if (instrument >= 8 && instrument <= 15) {
+      // 8-15: Chromatic Percussion (オルゴール, 鉄琴, マリンバ, ベル)
+      oscType = 'sine';
+      filterFreq = 6500;
+      attack = 0.001;
+      decay = 0.7;
+      sustain = 0.02;
+      release = 0.35;
+    } else if (instrument >= 16 && instrument <= 23) {
+      // 16-23: Organ (パイプオルガン, ハモンド, アコーディオン, ハーモニカ)
+      oscType = instrument === 19 ? 'sawtooth' : 'sine';
       filterFreq = 3000;
-      attack = 0.005;
-      decay = 0.8;
-      sustain = 0.15;
-      release = 0.3;
+      attack = 0.02;
+      decay = 0.1;
+      sustain = 0.9;
+      release = 0.08;
     } else if (instrument >= 24 && instrument <= 31) {
-      // Guitar 系
-      oscType = 'sawtooth';
-      filterFreq = 2500;
-      attack = 0.01;
-      decay = 0.5;
-      sustain = 0.2;
-      release = 0.2;
+      // 24-31: Guitar
+      if (instrument >= 29 && instrument <= 30) {
+        // Overdrive / Distortion
+        oscType = 'sawtooth';
+        filterFreq = 2200;
+        attack = 0.005;
+        decay = 0.3;
+        sustain = 0.7;
+        release = 0.25;
+      } else if (instrument === 31) {
+        // Harmonics
+        oscType = 'sine';
+        filterFreq = 6000;
+        attack = 0.002;
+        decay = 0.8;
+        sustain = 0.05;
+        release = 0.3;
+      } else {
+        // Acoustic / Clean Guitar
+        oscType = instrument >= 26 ? 'sawtooth' : 'triangle';
+        filterFreq = 2800;
+        attack = 0.008;
+        decay = 0.6;
+        sustain = 0.15;
+        release = 0.25;
+      }
     } else if (instrument >= 32 && instrument <= 39) {
-      // Bass 系
-      oscType = 'sawtooth';
-      filterFreq = 800;
+      // 32-39: Bass (ウッドベース, エレキベース, シンセベース)
+      oscType = instrument >= 38 ? 'square' : 'sawtooth';
+      filterFreq = 900; // 重低音ローパス
       attack = 0.01;
-      decay = 0.4;
-      sustain = 0.6;
+      decay = 0.45;
+      sustain = 0.55;
       release = 0.15;
     } else if (instrument >= 40 && instrument <= 47) {
-      // Strings 系
-      oscType = 'sawtooth';
-      filterFreq = 2000;
-      attack = 0.1;
-      decay = 0.4;
-      sustain = 0.8;
-      release = 0.5;
+      // 40-47: Solo Strings (バイオリン, チェロ, ハープ, ピチカート)
+      if (instrument === 45 || instrument === 46) {
+        // Pizzicato / Harp
+        oscType = 'triangle';
+        filterFreq = 3200;
+        attack = 0.002;
+        decay = 0.6;
+        sustain = 0.05;
+        release = 0.2;
+      } else if (instrument === 47) {
+        // Timpani
+        oscType = 'sine';
+        filterFreq = 450;
+        attack = 0.005;
+        decay = 0.6;
+        sustain = 0.05;
+        release = 0.3;
+      } else {
+        // Violin / Cello
+        oscType = 'sawtooth';
+        filterFreq = 2400;
+        attack = 0.08;
+        decay = 0.3;
+        sustain = 0.85;
+        release = 0.4;
+      }
+    } else if (instrument >= 48 && instrument <= 55) {
+      // 48-55: Ensemble & Choir (ストリングス合奏, クワイア, オーケストラヒット)
+      if (instrument >= 52 && instrument <= 54) {
+        // Choir / Voice (合唱)
+        oscType = 'sine';
+        filterFreq = 1600;
+        attack = 0.15;
+        decay = 0.25;
+        sustain = 0.8;
+        release = 0.45;
+      } else if (instrument === 55) {
+        // Orchestra Hit
+        oscType = 'sawtooth';
+        filterFreq = 4500;
+        attack = 0.001;
+        decay = 0.35;
+        sustain = 0.2;
+        release = 0.25;
+      } else {
+        // String Ensemble 1 & 2, Synth Strings
+        oscType = 'sawtooth';
+        filterFreq = 2800;
+        attack = 0.12;
+        decay = 0.25;
+        sustain = 0.88;
+        release = 0.5;
+      }
     } else if (instrument >= 56 && instrument <= 63) {
-      // Brass 系
+      // 56-63: Brass (トランペット, トロンボーン, ホルン, ブラスセクション)
       oscType = 'sawtooth';
-      filterFreq = 3500;
+      filterFreq = 3400;
       attack = 0.04;
       decay = 0.2;
-      sustain = 0.7;
+      sustain = 0.78;
       release = 0.2;
-    } else if (instrument >= 73 && instrument <= 79) {
-      // Flute 系
+      isBrass = true;
+    } else if (instrument >= 64 && instrument <= 71) {
+      // 64-71: Reed (サックス, オーボエ, ファゴット, クラリネット)
+      oscType = instrument >= 68 ? 'square' : 'sawtooth';
+      filterFreq = 2600;
+      attack = 0.03;
+      decay = 0.2;
+      sustain = 0.82;
+      release = 0.18;
+    } else if (instrument >= 72 && instrument <= 79) {
+      // 72-79: Pipe (フルート, ピッコロ, リコーダー, 尺八, オカリナ)
       oscType = 'sine';
-      filterFreq = 5000;
+      filterFreq = 5200;
       attack = 0.05;
       decay = 0.1;
-      sustain = 0.85;
+      sustain = 0.88;
       release = 0.15;
+    } else if (instrument >= 80 && instrument <= 87) {
+      // 80-87: Synth Lead (矩形波リード, ノコギリ波リード 等)
+      oscType = instrument === 80 ? 'square' : 'sawtooth';
+      filterFreq = 4000;
+      attack = 0.006;
+      decay = 0.15;
+      sustain = 0.75;
+      release = 0.18;
+    } else if (instrument >= 88 && instrument <= 95) {
+      // 88-95: Synth Pad (幻想的なパッド音)
+      oscType = 'sawtooth';
+      filterFreq = 2000;
+      attack = 0.25;
+      decay = 0.35;
+      sustain = 0.9;
+      release = 0.7;
+    } else if (instrument >= 104 && instrument <= 111) {
+      // 104-111: Ethnic (シタール, 三味線, 琴, カリンバ)
+      if (instrument === 108) {
+        // Kalimba
+        oscType = 'sine';
+        filterFreq = 3600;
+        attack = 0.002;
+        decay = 0.6;
+        sustain = 0.05;
+        release = 0.25;
+      } else {
+        // Shamisen / Koto / Sitar
+        oscType = 'sawtooth';
+        filterFreq = 4200;
+        attack = 0.002;
+        decay = 0.5;
+        sustain = 0.08;
+        release = 0.25;
+      }
+    } else if (instrument >= 112 && instrument <= 119) {
+      // 112-119: Percussive (スチールドラム, 和太鼓 等)
+      if (instrument === 114) {
+        // Steel Drum
+        oscType = 'sine';
+        filterFreq = 4000;
+        attack = 0.002;
+        decay = 0.75;
+        sustain = 0.12;
+        release = 0.25;
+      } else if (instrument === 116) {
+        // Taiko
+        oscType = 'triangle';
+        filterFreq = 650;
+        attack = 0.002;
+        decay = 0.4;
+        sustain = 0.05;
+        release = 0.2;
+      } else {
+        oscType = 'triangle';
+        filterFreq = 2400;
+        attack = 0.002;
+        decay = 0.4;
+        sustain = 0.05;
+        release = 0.2;
+      }
     } else {
-      // Synth / その他
+      // 96-103: Synth FX / 120-127: SFX / その他
       oscType = 'square';
-      filterFreq = 2500;
+      filterFreq = 2800;
       attack = 0.01;
-      decay = 0.2;
+      decay = 0.25;
       sustain = 0.5;
       release = 0.2;
     }
@@ -202,7 +372,14 @@ export class AudioEngine {
     osc.frequency.setValueAtTime(freq, startAudioTime);
 
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(filterFreq, startAudioTime);
+    if (isBrass) {
+      // ブラス特有のフィルター開閉エンベロープ
+      filter.frequency.setValueAtTime(filterFreq * 0.4, startAudioTime);
+      filter.frequency.linearRampToValueAtTime(filterFreq * 1.5, startAudioTime + attack);
+      filter.frequency.exponentialRampToValueAtTime(filterFreq, startAudioTime + attack + decay);
+    } else {
+      filter.frequency.setValueAtTime(filterFreq, startAudioTime);
+    }
 
     // ADSR エンベロープ
     const peakGain = vel * 0.4;
@@ -268,7 +445,8 @@ export class AudioEngine {
         if (noteEndSec > startOffsetSec) {
           const audioStartTime = now + (noteStartSec - startOffsetSec);
           if (audioStartTime >= now) {
-            const node = this.scheduleNote(ctx, note, track.instrument, audioStartTime, noteDurSec, masterGain);
+            const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+            const node = this.scheduleNote(ctx, note, inst, audioStartTime, noteDurSec, masterGain);
             this.activeNodes.push(node);
           }
         }
@@ -403,7 +581,8 @@ export class AudioEngine {
         const noteEndSec = this.beatToSec(note.startTime + note.duration);
         const noteDurSec = Math.max(0.05, noteEndSec - noteStartSec);
 
-        this.scheduleNote(offlineCtx, note, track.instrument, noteStartSec, noteDurSec, masterGain);
+        const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+        this.scheduleNote(offlineCtx, note, inst, noteStartSec, noteDurSec, masterGain);
       });
     });
 
