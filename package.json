@@ -1,0 +1,33 @@
+{
+  "name": "midi-composer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "lamejs": "^1.2.1",
+    "lucide-react": "^1.38.0",
+    "midi-writer-js": "^3.2.1",
+    "tone": "^15.1.22",
+    "vexflow": "^5.0.0"
+  }
+}
