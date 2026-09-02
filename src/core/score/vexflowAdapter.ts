@@ -18,6 +18,7 @@ export type PartNameDisplayMode = 'abbr' | 'abbrJa' | 'multilineJa' | 'trackOnly
 
 export interface ScoreDisplayOptions {
   showTitle: boolean;          // 楽譜タイトルを表示するか
+  showSubInfo?: boolean;       // タイトル下の詳細情報 (パート数・テンポ・拍子・小節数等) を表示するか
   showTempo: boolean;          // テンポ指示 (♩=120) を表示するか
   showTimeSignature: boolean;  // 拍子記号 (4/4 等) を表示するか
   showTrackDetails: boolean;   // パート別の個別指示(テンポ/拍子等)を表示するか
@@ -29,6 +30,7 @@ export interface ScoreDisplayOptions {
 
 export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   showTitle: true,
+  showSubInfo: true,
   showTempo: true,
   showTimeSignature: true,
   showTrackDetails: true,
@@ -269,8 +271,9 @@ export function renderScoreToSvg(
 
   // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
   if (options.showTitle) {
+    const showSub = options.showSubInfo !== false;
     const headerDiv = document.createElement('div');
-    headerDiv.className = 'score-title-header w-full text-center mb-6 pt-1 pb-3 border-b border-slate-200';
+    headerDiv.className = `score-title-header w-full text-center ${showSub ? 'mb-8' : 'mb-6'} pt-1 pb-3 border-b border-slate-200`;
     
     const titleText = options.customTitle?.trim() || score.title || `${track.name || `Track ${selectedTrackIndex + 1}`}`;
     
@@ -279,16 +282,18 @@ export function renderScoreToSvg(
     h1.textContent = titleText;
     headerDiv.appendChild(h1);
 
-    const sub = document.createElement('div');
-    sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
-    sub.innerHTML = `
-      <span class="font-semibold text-slate-800">${track.name || `Track ${selectedTrackIndex + 1}`}: ${inst.nameJa}</span>
-      <span class="text-slate-400">|</span>
-      <span>Tempo: ${trackTempo} BPM</span>
-      <span class="text-slate-400">|</span>
-      <span>拍子: ${trackTimeSig.numerator}/${trackTimeSig.denominator}</span>
-    `;
-    headerDiv.appendChild(sub);
+    if (showSub) {
+      const sub = document.createElement('div');
+      sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
+      sub.innerHTML = `
+        <span class="font-semibold text-slate-800">${track.name || `Track ${selectedTrackIndex + 1}`}: ${inst.nameJa}</span>
+        <span class="text-slate-400">|</span>
+        <span>Tempo: ${trackTempo} BPM</span>
+        <span class="text-slate-400">|</span>
+        <span>拍子: ${trackTimeSig.numerator}/${trackTimeSig.denominator}</span>
+      `;
+      headerDiv.appendChild(sub);
+    }
     container.appendChild(headerDiv);
   }
 
@@ -296,8 +301,8 @@ export function renderScoreToSvg(
 
   const measuresPerRow = containerWidth > 900 ? 3 : containerWidth > 600 ? 2 : 1;
   const staveWidth = Math.floor((containerWidth - 40) / measuresPerRow);
-  // 低音加線や高音加線が切れないよう、十分な高さを確保 (150px)
-  const staveHeight = 150;
+  // コードネームや低音加線・高音加線が切れないよう、十分な高さを確保 (165px)
+  const staveHeight = 165;
   const rowCount = Math.ceil(measureGroups.length / measuresPerRow);
 
   const defaultClef = getTrackClef(track);
@@ -328,7 +333,7 @@ export function renderScoreToSvg(
 
       const mGroup = measureGroups[idx];
       const x = 20 + c * staveWidth;
-      const y = 35; // 上部余白を確保してテンポ表示と高音加線を保護
+      const y = 45; // 上部余白を確保してヘッダー、コード表示、テンポ表示を保護
 
       const stave = new Stave(x, y, staveWidth);
 
@@ -448,8 +453,9 @@ export function renderFullScoreToSvg(
 
   // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
   if (options.showTitle) {
+    const showSub = options.showSubInfo !== false;
     const headerDiv = document.createElement('div');
-    headerDiv.className = 'score-title-header w-full text-center mb-6 pt-1 pb-3 border-b border-slate-200';
+    headerDiv.className = `score-title-header w-full text-center ${showSub ? 'mb-8' : 'mb-6'} pt-1 pb-3 border-b border-slate-200`;
     
     const titleText = options.customTitle?.trim() || score.title || 'Full Score (総譜)';
     
@@ -458,18 +464,20 @@ export function renderFullScoreToSvg(
     h1.textContent = titleText;
     headerDiv.appendChild(h1);
 
-    const sub = document.createElement('div');
-    sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
-    sub.innerHTML = `
-      <span class="font-semibold text-slate-800">全 ${tracks.length} パート</span>
-      <span class="text-slate-400">|</span>
-      <span>Tempo: ${globalTempo} BPM</span>
-      <span class="text-slate-400">|</span>
-      <span>拍子: ${globalTimeSig.numerator}/${globalTimeSig.denominator}</span>
-      <span class="text-slate-400">|</span>
-      <span>総小節数: ${Math.ceil(score.totalDuration / (globalTimeSig.numerator || 4))}</span>
-    `;
-    headerDiv.appendChild(sub);
+    if (showSub) {
+      const sub = document.createElement('div');
+      sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
+      sub.innerHTML = `
+        <span class="font-semibold text-slate-800">全 ${tracks.length} パート</span>
+        <span class="text-slate-400">|</span>
+        <span>Tempo: ${globalTempo} BPM</span>
+        <span class="text-slate-400">|</span>
+        <span>拍子: ${globalTimeSig.numerator}/${globalTimeSig.denominator}</span>
+        <span class="text-slate-400">|</span>
+        <span>総小節数: ${Math.ceil(score.totalDuration / (globalTimeSig.numerator || 4))}</span>
+      `;
+      headerDiv.appendChild(sub);
+    }
     container.appendChild(headerDiv);
   }
 
@@ -496,9 +504,10 @@ export function renderFullScoreToSvg(
   const leftMargin = partNameMode === 'multilineJa' ? 95 : partNameMode === 'trackOnly' ? 45 : 75;
   const staveWidth = Math.floor((containerWidth - leftMargin - 25) / measuresPerRow);
 
-  // 1パートあたりの高さを 125px に設定
+  // 1パートあたりの高さを 125px に設定、上部コード余白を考慮して systemHeight を調整
   const trackStaveHeight = 125;
-  const systemHeight = tracks.length * trackStaveHeight + 45;
+  const topPadding = 42;
+  const systemHeight = tracks.length * trackStaveHeight + topPadding + 25;
   const rowCount = Math.ceil(totalMeasures / measuresPerRow);
 
   const trackClefs = tracks.map((t) => getTrackClef(t));
@@ -529,7 +538,7 @@ export function renderFullScoreToSvg(
       const stavesInMeasure: Stave[] = [];
 
       tracks.forEach((track, tIdx) => {
-        const staveY = 25 + tIdx * trackStaveHeight;
+        const staveY = topPadding + tIdx * trackStaveHeight;
         const stave = new Stave(x, staveY, staveWidth);
         const clef = trackClefs[tIdx];
 

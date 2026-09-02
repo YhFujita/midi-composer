@@ -322,6 +322,19 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                     />
                   </label>
 
+                  {/* タイトル下の詳細情報（サブ情報）表示 */}
+                  {displayOptions.showTitle && (
+                    <label className="flex items-center justify-between p-1.5 pl-4 rounded hover:bg-slate-100 cursor-pointer select-none text-slate-700">
+                      <span className="text-[11px] font-medium">詳細情報 (パート数/テンポ/拍子等) を表示</span>
+                      <input
+                        type="checkbox"
+                        checked={displayOptions.showSubInfo !== false}
+                        onChange={(e) => updateDisplayOption('showSubInfo', e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                      />
+                    </label>
+                  )}
+
                   {/* テンポ表示 */}
                   <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
                     <span className="text-slate-800 font-medium">テンポ指示を表示 (♩ = BPM)</span>
