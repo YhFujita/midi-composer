@@ -43,53 +43,56 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   };
 
   return (
-    <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 text-slate-200 text-xs gap-2 select-none">
+    <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 text-slate-200 text-xs gap-2 select-none">
       {/* 左エリア: 楽器選択ボタン & クイック選択 */}
       <div className="flex items-center space-x-1.5 flex-wrap">
-        <span className="text-[11px] text-slate-400 font-medium mr-1 flex items-center">
+        <span className="text-[11px] text-slate-300 font-semibold mr-1 flex items-center">
           <Music2 className="w-3.5 h-3.5 mr-1 text-blue-400" />
           楽器:
         </span>
 
-        {/* 楽器選択パレットを開くボタン */}
+        {/* 楽器選択パレットを開くボタン: 白背景・不透明・黒文字 */}
         <button
           type="button"
           onClick={onOpenModal}
-          className="flex items-center space-x-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 hover:border-slate-600 rounded-md transition-all text-xs text-left group"
+          className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-300 rounded-md transition-all text-xs text-left shadow-sm group"
+          style={{ backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 }}
           title="楽器選択パレットを開く (全128音色)"
         >
-          <span className="font-mono text-blue-400 font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded text-[11px] border border-slate-800">
+          <span className="font-mono text-blue-700 font-bold bg-blue-50 px-1.5 py-0.5 rounded text-[11px] border border-blue-200">
             #{selectedProgram}
           </span>
-          <span className="font-medium text-slate-100 max-w-[130px] sm:max-w-[180px] truncate">
+          <span className="font-bold text-slate-900 max-w-[130px] sm:max-w-[180px] truncate">
             {currentInst.nameJa}
           </span>
-          <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-white" />
+          <ChevronDown className="w-3 h-3 text-slate-500 group-hover:text-slate-800" />
         </button>
 
         {/* 試聴ボタン */}
         <button
           type="button"
           onClick={handlePreview}
-          className="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-300 hover:text-white transition-colors"
+          className="p-1.5 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-md text-blue-600 hover:text-blue-700 transition-colors shadow-sm"
+          style={{ backgroundColor: '#ffffff', opacity: 1 }}
           title="選択中の楽器をプレビュー試聴"
         >
-          <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+          <Volume2 className="w-3.5 h-3.5" />
         </button>
 
-        {/* 主要音色クイックセレクター */}
+        {/* 主要音色クイックセレクター: 白背景・不透明・黒文字 */}
         <div className="hidden sm:flex items-center space-x-1 pl-1">
           <select
             value={selectedProgram}
             onChange={(e) => onSelectProgram(parseInt(e.target.value, 10))}
-            className="bg-slate-950 border border-slate-800 text-slate-300 text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-700 focus:border-blue-500 max-w-[130px] truncate"
+            className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm max-w-[140px] truncate"
+            style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
             title="よく使う音色のクイック選択"
           >
-            <option value="" disabled>
+            <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
               クイック選択...
             </option>
             {POPULAR_INSTRUMENTS.map((inst) => (
-              <option key={inst.program} value={inst.program}>
+              <option key={inst.program} value={inst.program} style={{ backgroundColor: '#ffffff', color: '#000000' }}>
                 {inst.program}: {inst.nameJa}
               </option>
             ))}
@@ -99,16 +102,17 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}
       <div className="flex items-center space-x-2 ml-auto">
-        {/* 書式選択ドロップダウン */}
+        {/* 書式選択ドロップダウン: 白背景・不透明・黒文字 */}
         <div className="flex items-center space-x-1">
           <select
             value={formatType}
             onChange={(e) => onChangeFormatType(e.target.value as InsertFormatType)}
-            className="bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 text-[11px] rounded-md px-2 py-1 outline-none focus:border-blue-500"
+            className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+            style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
             title="エディタ挿入時の構文形式"
           >
-            <option value="with-comment">形式: コメント付 (推奨)</option>
-            <option value="voice-only">形式: Voice のみ</option>
+            <option value="with-comment" style={{ backgroundColor: '#ffffff', color: '#000000' }}>形式: コメント付 (推奨)</option>
+            <option value="voice-only" style={{ backgroundColor: '#ffffff', color: '#000000' }}>形式: Voice のみ</option>
           </select>
         </div>
 
@@ -116,7 +120,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         <button
           type="button"
           onClick={handleInsert}
-          className="flex items-center space-x-1.5 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-medium rounded-md shadow-sm shadow-blue-900/40 transition-all text-xs"
+          className="flex items-center space-x-1.5 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-semibold rounded-md shadow-sm shadow-blue-900/40 transition-all text-xs"
           title="エディタの現在の入力場所 (カーソル位置) に構文エラーのない形式で出力します"
         >
           <CornerDownLeft className="w-3.5 h-3.5" />

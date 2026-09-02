@@ -98,7 +98,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           </button>
         </div>
 
-        {/* プリセット曲選択 */}
+        {/* プリセット曲選択: 白背景・不透明・黒文字 */}
         <div className="flex items-center space-x-1.5">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
           <select
@@ -110,13 +110,14 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 setSelectedPreset(e.target.value);
               }
             }}
-            className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1 outline-none hover:border-slate-600 focus:border-blue-500"
+            className="bg-white border border-slate-300 text-slate-900 font-medium text-xs rounded-md px-2.5 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+            style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
           >
-            <option value="" disabled>
+            <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
               サンプル曲を読み込む...
             </option>
             {PRESET_SONGS.map((song) => (
-              <option key={song.id} value={song.id}>
+              <option key={song.id} value={song.id} style={{ backgroundColor: '#ffffff', color: '#000000' }}>
                 {song.title}
               </option>
             ))}

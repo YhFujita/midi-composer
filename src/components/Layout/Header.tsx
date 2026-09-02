@@ -32,14 +32,14 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="flex items-center space-x-3">
         {/* 画面分割方向の切り替え (左右分割 / 上下分割) */}
-        <div className="flex items-center bg-slate-800/90 border border-slate-700/80 rounded-lg p-0.5 text-xs">
+        <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-0.5 text-xs">
           <button
             type="button"
             onClick={() => onChangeLayout('horizontal')}
             className={`flex items-center space-x-1 px-2.5 py-1 rounded-md transition-all ${
               layoutOrientation === 'horizontal'
-                ? 'bg-blue-600 text-white font-medium shadow-sm ring-1 ring-blue-400/50'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700'
             }`}
             title="エディタと楽譜を左右に並べて表示"
           >
@@ -51,8 +51,8 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onChangeLayout('vertical')}
             className={`flex items-center space-x-1 px-2.5 py-1 rounded-md transition-all ${
               layoutOrientation === 'vertical'
-                ? 'bg-blue-600 text-white font-medium shadow-sm ring-1 ring-blue-400/50'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700'
             }`}
             title="エディタと楽譜を上下に並べて表示"
           >
@@ -61,12 +61,13 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* MML記法ガイドモーダルボタン */}
+        {/* MML記法ガイドモーダルボタン: 白背景・不透明・黒文字 */}
         <button
           onClick={onOpenGuide}
-          className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md transition-colors"
+          className="flex items-center space-x-1.5 px-3 py-1 text-xs font-semibold text-slate-900 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-md transition-all shadow-sm"
+          style={{ backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 }}
         >
-          <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+          <BookOpen className="w-3.5 h-3.5 text-blue-600" />
           <span>MML 記法ガイド</span>
         </button>
       </div>
