@@ -257,84 +257,90 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 pt-6 sm:pt-10 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+    <div className="fixed inset-0 z-40 pointer-events-none flex items-start justify-end p-2 sm:p-4 pt-16 sm:pt-20">
       <div
-        className="relative w-full max-w-2xl bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-48px)] sm:max-h-[calc(100vh-72px)]"
+        className="pointer-events-auto relative w-full sm:w-[410px] bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-76px)] sm:max-h-[calc(100vh-96px)] animate-in slide-in-from-right-4 duration-200"
         style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
       >
         {/* ヘッダー */}
-        <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-5 py-2.5 sm:py-3 border-b border-slate-200 bg-slate-50">
+        <div className="flex-shrink-0 flex items-center justify-between px-3.5 sm:px-4 py-2 sm:py-2.5 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center space-x-2">
             <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+              <Sparkles className="w-4 h-4 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900">コード簡易入力パレット</h2>
-              <p className="text-[10px] sm:text-[11px] text-slate-500">
-                和音・コードネームを選択してエディタのカーソル位置へ挿入します
+              <h2 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                コード入力パレット
+                <span className="text-[10px] font-normal text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                  右側パネル
+                </span>
+              </h2>
+              <p className="text-[10px] text-slate-500">
+                テキスト入力と並行してコードを挿入できます
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
+            title="パレットを閉じる"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* タブ切り替えボタン */}
-        <div className="flex-shrink-0 flex items-center space-x-1 px-4 sm:px-5 pt-2.5 pb-2 border-b border-slate-200 bg-white">
+        <div className="flex-shrink-0 flex items-center space-x-1 px-2.5 sm:px-3 pt-2 pb-1.5 border-b border-slate-200 bg-white">
           <button
             type="button"
             onClick={() => setActiveTab('builder')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center justify-center space-x-1 flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'builder'
                 ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
             }`}
           >
-            <Music className="w-3.5 h-3.5" />
-            <span>コードビルダー</span>
+            <Music className="w-3 h-3" />
+            <span>ビルダー</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('diatonic')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center justify-center space-x-1 flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'diatonic'
                 ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" />
-            <span>ダイアトニック高速入力</span>
+            <Layers className="w-3 h-3" />
+            <span>ダイアトニック</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('progression')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center justify-center space-x-1 flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'progression'
                 ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
             }`}
           >
-            <FileText className="w-3.5 h-3.5" />
-            <span>コード進行一括展開</span>
+            <FileText className="w-3 h-3" />
+            <span>進行展開</span>
           </button>
         </div>
 
         {/* コンテンツエリア (min-h-0 で内部スクロールを保証) */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3.5 bg-[#f8fafc]">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 bg-[#f8fafc]">
           {/* 1. コードビルダー タブ */}
           {activeTab === 'builder' && (
             <div className="space-y-3">
-              {/* ルート音選択 */}
+              {/* ルート音選択 (6列×2行でジャストフィット) */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
                   <span>ルート音 (根音):</span>
                   <span className="text-blue-600 font-mono text-xs font-bold">{builderRoot}</span>
                 </label>
-                <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
+                <div className="grid grid-cols-6 gap-1">
                   {ROOT_NOTES.map((r) => {
                     const isSelected = builderRoot === r.name;
                     return (
@@ -342,9 +348,9 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                         key={r.name}
                         type="button"
                         onClick={() => setBuilderRoot(r.name)}
-                        className={`py-1 sm:py-1.5 text-xs font-bold rounded-md sm:rounded-lg border transition-all ${
+                        className={`py-1 text-xs font-bold rounded-md border transition-all ${
                           isSelected
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm ring-2 ring-blue-400'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm ring-1 ring-blue-400'
                             : 'bg-white text-slate-800 border-slate-300 hover:border-blue-400 hover:bg-blue-50'
                         }`}
                       >
@@ -497,7 +503,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                 <label className="text-xs font-bold text-slate-700">
                   ダイアトニックコード一覧（クリックで連続挿入）:
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   {DIATONIC_KEYS[selectedKeyIdx].chords.map((c) => {
                     const chordName = `${c.root}${c.type}`;
                     return (
@@ -505,19 +511,19 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                         key={`${c.root}-${c.degree}`}
                         type="button"
                         onClick={() => handleInsertDiatonic(c.root, c.type)}
-                        className="flex flex-col p-3 rounded-xl bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 active:scale-95 transition-all text-left group shadow-sm"
+                        className="flex flex-col p-2 rounded-xl bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 active:scale-95 transition-all text-left group shadow-sm"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-lg font-bold text-slate-900 group-hover:text-blue-600">
+                          <span className="text-base font-bold text-slate-900 group-hover:text-blue-600">
                             {chordName}
                           </span>
-                          <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">
+                          <span className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1 py-0.2 rounded font-bold">
                             {c.degree}
                           </span>
                         </div>
-                        <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+                        <div className="text-[9px] text-slate-400 mt-0.5 flex items-center justify-between">
                           <span>{c.func}</span>
-                          <CornerDownLeft className="w-3 h-3 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <CornerDownLeft className="w-2.5 h-2.5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
                       </button>
                     );
@@ -529,32 +535,32 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
 
           {/* 3. コード進行一括展開 タブ */}
           {activeTab === 'progression' && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {/* テキスト入力エリア */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
                   <span>コード進行テキスト入力:</span>
-                  <span className="text-[11px] text-slate-500">スペース区切りでコードを入力</span>
+                  <span className="text-[10px] text-slate-500">スペース区切りで入力</span>
                 </label>
                 <input
                   type="text"
                   value={progressionText}
                   onChange={(e) => setProgressionText(e.target.value)}
                   placeholder="例: C G Am F や Dm7 G7 Cmaj7"
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-mono font-bold text-slate-900 outline-none focus:border-blue-500 shadow-sm"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-500 shadow-sm"
                 />
               </div>
 
               {/* 1コードあたりの音長 */}
-              <div className="flex items-center space-x-2 bg-white p-2.5 rounded-xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-700">1コードあたりの長さ:</span>
-                <div className="flex items-center space-x-1">
+              <div className="flex items-center space-x-1.5 bg-white p-2 rounded-xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-700 whitespace-nowrap">音長:</span>
+                <div className="flex items-center space-x-1 overflow-x-auto">
                   {DURATION_OPTIONS.slice(0, 4).map((d) => (
                     <button
                       key={d.value}
                       type="button"
                       onClick={() => setProgressionDuration(d.value)}
-                      className={`px-2.5 py-1 text-xs rounded-md font-semibold transition-all ${
+                      className={`px-2 py-0.5 text-xs rounded-md font-semibold transition-all whitespace-nowrap ${
                         progressionDuration === d.value
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -567,18 +573,18 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
               </div>
 
               {/* 定番プリセット */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700">定番コード進行プリセット:</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-1.5">
                   {PRESET_PROGRESSIONS.map((p) => (
                     <button
                       key={p.name}
                       type="button"
                       onClick={() => setProgressionText(p.text)}
-                      className="text-left p-2 rounded-lg bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50 text-xs transition-all flex flex-col shadow-sm"
+                      className="text-left p-1.5 rounded-lg bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50 text-xs transition-all flex flex-col shadow-sm"
                     >
-                      <span className="font-bold text-slate-800">{p.name}</span>
-                      <span className="font-mono text-[11px] text-blue-600 mt-0.5">{p.text}</span>
+                      <span className="font-bold text-slate-800 text-[11px]">{p.name}</span>
+                      <span className="font-mono text-[10px] text-blue-600 mt-0.5">{p.text}</span>
                     </button>
                   ))}
                 </div>
@@ -589,51 +595,55 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
 
         {/* 固定フッター（アクションボタン） */}
         {activeTab === 'builder' && (
-          <div className="flex-shrink-0 flex flex-wrap items-center justify-between px-4 sm:px-5 py-2.5 border-t border-slate-200 bg-slate-50 gap-2">
+          <div className="flex-shrink-0 flex items-center justify-between px-3.5 py-2 border-t border-slate-200 bg-slate-50 gap-2">
             {/* 生成プレビュー */}
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-slate-600 font-semibold">生成MML:</span>
-              <span className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-blue-700 shadow-sm">
+            <div className="flex items-center space-x-1.5 min-w-0">
+              <span className="text-[11px] text-slate-500 font-semibold">MML:</span>
+              <span className="px-2 py-0.5 bg-white border border-slate-300 rounded text-xs font-mono font-bold text-blue-700 shadow-sm truncate max-w-[130px]">
                 {generatedMml}
               </span>
             </div>
 
             {/* アクションボタン */}
-            <div className="flex items-center space-x-2 ml-auto">
+            <div className="flex items-center space-x-1.5 ml-auto">
               <button
                 type="button"
                 onClick={() => handlePreview()}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-blue-600 font-bold rounded-lg text-xs shadow-sm transition-all"
+                className="flex items-center space-x-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-blue-600 font-bold rounded-lg text-xs shadow-sm transition-all"
                 title="選択中のコードを試聴"
               >
-                <Volume2 className="w-4 h-4" />
+                <Volume2 className="w-3.5 h-3.5" />
                 <span>試聴</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleInsertBuilder}
-                className="flex items-center space-x-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-bold rounded-lg text-xs shadow-md transition-all"
+                className="flex items-center space-x-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-bold rounded-lg text-xs shadow-md transition-all whitespace-nowrap"
               >
                 <CornerDownLeft className="w-3.5 h-3.5" />
-                <span>現在の位置へ挿入</span>
+                <span>挿入</span>
               </button>
             </div>
           </div>
         )}
 
+        {activeTab === 'diatonic' && (
+          <div className="flex-shrink-0 flex items-center justify-between px-3.5 py-2 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+            <span>💡 各コードを押すと即座に挿入</span>
+            <span className="font-semibold text-blue-600 font-mono">{DIATONIC_KEYS[selectedKeyIdx].name}</span>
+          </div>
+        )}
+
         {activeTab === 'progression' && (
-          <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-5 py-2.5 border-t border-slate-200 bg-slate-50">
-            <span className="text-[11px] text-slate-500 hidden sm:inline">
-              入力されたコードをMMLに一括変換してカーソル位置に挿入します
-            </span>
+          <div className="flex-shrink-0 flex items-center justify-end px-3.5 py-2 border-t border-slate-200 bg-slate-50">
             <button
               type="button"
               onClick={handleInsertProgression}
-              className="flex items-center space-x-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-bold rounded-lg text-xs shadow-md transition-all ml-auto"
+              className="w-full flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-bold rounded-lg text-xs shadow-md transition-all"
             >
               <CornerDownLeft className="w-3.5 h-3.5" />
-              <span>コード進行をMML和音に変換して挿入</span>
+              <span>進行をMML和音に変換して挿入</span>
             </button>
           </div>
         )}

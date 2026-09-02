@@ -307,7 +307,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
         selectedProgram={selectedProgram}
         onSelectProgram={setSelectedProgram}
         onOpenModal={() => setIsInstrumentModalOpen(true)}
-        onOpenChordModal={() => setIsChordModalOpen(true)}
+        onOpenChordModal={() => setIsChordModalOpen((prev) => !prev)}
+        isChordModalOpen={isChordModalOpen}
         onInsertToEditor={insertInstrumentCode}
         formatType={formatType}
         onChangeFormatType={setFormatType}

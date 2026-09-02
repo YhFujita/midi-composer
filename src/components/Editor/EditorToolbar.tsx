@@ -20,6 +20,7 @@ interface EditorToolbarProps {
   onSelectProgram: (program: number) => void;
   onOpenModal: () => void;
   onOpenChordModal: () => void;
+  isChordModalOpen?: boolean;
   onInsertToEditor: (program: number, format: InsertFormatType) => void;
   formatType: InsertFormatType;
   onChangeFormatType: (format: InsertFormatType) => void;
@@ -30,6 +31,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onSelectProgram,
   onOpenModal,
   onOpenChordModal,
+  isChordModalOpen,
   onInsertToEditor,
   formatType,
   onChangeFormatType,
@@ -103,16 +105,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
         <span className="text-slate-600 hidden sm:inline px-0.5">|</span>
 
-        {/* コード入力ボタン: 白背景・不透明・黒文字 */}
+        {/* コード入力ボタン: 開いている時はアクティブスタイル */}
         <button
           type="button"
           onClick={onOpenChordModal}
-          className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-300 rounded-md transition-all text-xs font-bold text-slate-900 shadow-sm group"
-          style={{ backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 }}
-          title="コード簡易入力パレットを開く (コードビルダー・ダイアトニックコード・コード進行一括展開)"
+          className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-all text-xs font-bold shadow-sm group border ${
+            isChordModalOpen
+              ? 'bg-blue-50 text-blue-700 border-blue-500 ring-1 ring-blue-400'
+              : 'bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-900 border-slate-300'
+          }`}
+          style={!isChordModalOpen ? { backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 } : {}}
+          title="コード入力パレットを開閉 (テキスト入力と並行して右側に表示)"
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <Sparkles className={`w-3.5 h-3.5 ${isChordModalOpen ? 'text-blue-600 animate-spin-slow' : 'text-amber-500'}`} />
           <span>コード入力</span>
+          {isChordModalOpen && (
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+          )}
         </button>
       </div>
 
