@@ -437,9 +437,10 @@ export class AudioEngine {
 
     score.tracks.forEach((track) => {
       track.notes.forEach((note) => {
+        const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         const noteStartSec = this.beatToSec(note.startTime);
-        const noteEndSec = this.beatToSec(note.startTime + note.duration);
-        const noteDurSec = Math.max(0.05, noteEndSec - noteStartSec);
+        const noteEndSec = this.beatToSec(note.startTime + noteDur);
+        const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         // 指定位置より先のノートのみスケジュール
         if (noteEndSec > startOffsetSec) {
@@ -577,9 +578,10 @@ export class AudioEngine {
 
     score.tracks.forEach((track) => {
       track.notes.forEach((note) => {
+        const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         const noteStartSec = this.beatToSec(note.startTime);
-        const noteEndSec = this.beatToSec(note.startTime + note.duration);
-        const noteDurSec = Math.max(0.05, noteEndSec - noteStartSec);
+        const noteEndSec = this.beatToSec(note.startTime + noteDur);
+        const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         const inst = note.instrument !== undefined ? note.instrument : track.instrument;
         this.scheduleNote(offlineCtx, note, inst, noteStartSec, noteDurSec, masterGain);

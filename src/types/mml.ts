@@ -8,6 +8,8 @@ export interface NoteEvent {
   channel: number;     // 1 - 16
   instrument?: number; // GM音色番号 (0-127)
   isChord?: boolean;   // 和音の一部か
+  gateRate?: number;   // ゲートタイム率 (0.0 - 1.0)
+  gateDuration?: number; // 4分音符基準の実際の発音長
   line?: number;       // ソース行番号
   column?: number;     // ソース列番号
 }

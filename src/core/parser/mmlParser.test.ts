@@ -79,4 +79,40 @@ describe('MML Parser', () => {
     expect(result.tracks[1].instrument).toBe(73);
     expect(result.tracks[1].notes).toHaveLength(2);
   });
+
+  it('q コマンドおよび Gate コマンドでゲートタイム(発音長)が正しく反映されること', () => {
+    // 8段階指定 (q4 = 50%), パーセント指定 (q80 = 80%), Gate(25) = 25%
+    const code = 'l4 q4 c q80 d Gate(25) e q8 [ceg]4';
+    const result = parseMML(code);
+
+    expect(result.errors).toHaveLength(0);
+    const notes = result.tracks[0].notes;
+    // c (q4: 50% = 0.5)
+    expect(notes[0].pitch).toBe('C4');
+    expect(notes[0].duration).toBe(1.0);
+    expect(notes[0].gateRate).toBe(0.5);
+    expect(notes[0].gateDuration).toBe(0.5);
+
+    // d (q80: 80% = 0.8)
+    expect(notes[1].pitch).toBe('D4');
+    expect(notes[1].duration).toBe(1.0);
+    expect(notes[1].gateRate).toBe(0.8);
+    expect(notes[1].gateDuration).toBe(0.8);
+
+    // e (Gate(25): 25% = 0.25)
+    expect(notes[2].pitch).toBe('E4');
+    expect(notes[2].duration).toBe(1.0);
+    expect(notes[2].gateRate).toBe(0.25);
+    expect(notes[2].gateDuration).toBe(0.25);
+
+    // [ceg]4 (q8: 100% = 1.0)
+    expect(notes[3].pitch).toBe('C4');
+    expect(notes[3].gateRate).toBe(1.0);
+    expect(notes[3].gateDuration).toBe(1.0);
+    expect(notes[4].pitch).toBe('E4');
+    expect(notes[4].gateDuration).toBe(1.0);
+    expect(notes[5].pitch).toBe('G4');
+    expect(notes[5].gateDuration).toBe(1.0);
+  });
 });
+

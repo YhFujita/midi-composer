@@ -123,8 +123,9 @@ export function generateMidiBlob(score: ParsedScore): Blob {
 
     // ノートオン / ノートオフ イベント
     track.notes.forEach((note) => {
+      const dur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
       const startTick = Math.round(note.startTime * PPQ);
-      const endTick = Math.round((note.startTime + note.duration) * PPQ);
+      const endTick = Math.max(startTick + 1, Math.round((note.startTime + dur) * PPQ));
       const midiNote = Math.max(0, Math.min(127, note.midiNote));
       const velocity = Math.max(1, Math.min(127, note.velocity));
 

@@ -89,6 +89,10 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
                 <code className="text-purple-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-purple-300 inline-block">v100 / ( / )</code>
                 <p className="text-slate-700 mt-1.5 font-medium">音量・ベロシティ指定 (0〜127) / (大きめ / )小さめ</p>
               </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-purple-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-purple-300 inline-block">q80 / Gate(80) / q4</code>
+                <p className="text-slate-700 mt-1.5 font-medium">ゲートタイム (音の長さ)。q100=伸ばす, q80=標準, q20やq2=スタッカート</p>
+              </div>
             </div>
           </div>
 

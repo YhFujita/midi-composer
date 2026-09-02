@@ -9,6 +9,7 @@ interface TrackState {
   octave: number;
   defaultLength: number;
   velocity: number;
+  gateRate: number;    // ゲートタイム率 (0.0 - 1.0)
   currentTime: number; // 4分音符基準の累積時間
   notes: NoteEvent[];
   tempoEvents: TempoEvent[];
@@ -33,6 +34,7 @@ export function parseMML(mmlCode: string): ParsedScore {
         octave: 4,
         defaultLength: 4,
         velocity: 100,
+        gateRate: 1.0,
         currentTime: 0,
         notes: [],
         tempoEvents: [],
@@ -147,9 +149,23 @@ export function parseMML(mmlCode: string): ParsedScore {
         continue;
       }
 
-      // 0.5 ゲートタイム (q8, q100, Gate(8))
-      const gateMatch = remaining.match(/^(?:q\s*\d+|GATE\(?=?\s*\d+\)?)/i);
+      // 0.5 ゲートタイム (q8, q100, Gate(80), Gate=80 等)
+      const gateMatch = remaining.match(/^(?:q\s*(\d+)|GATE(?:\s*\(\s*|\s*=\s*|\s+)?(\d+)\s*\)?)/i);
       if (gateMatch) {
+        const rawVal = parseInt(gateMatch[1] || gateMatch[2], 10);
+        if (!isNaN(rawVal)) {
+          let rate = 1.0;
+          if (rawVal === 0) {
+            rate = 0.05;
+          } else if (rawVal <= 8) {
+            // 8段階指定 (1〜8: 12.5%〜100%)
+            rate = rawVal / 8;
+          } else {
+            // パーセント指定 (9〜100+)
+            rate = Math.min(1.0, rawVal / 100);
+          }
+          currentTrack.gateRate = Math.max(0.01, rate);
+        }
         col += gateMatch[0].length;
         continue;
       }
@@ -323,6 +339,8 @@ export function parseMML(mmlCode: string): ParsedScore {
                 startTime: currentTrack.currentTime,
                 duration: chordDuration,
                 velocity: currentTrack.velocity,
+                gateRate: currentTrack.gateRate,
+                gateDuration: chordDuration * currentTrack.gateRate,
                 trackId: currentTrack.id,
                 channel: currentTrack.channel,
                 instrument: currentTrack.instrument,
@@ -381,6 +399,8 @@ export function parseMML(mmlCode: string): ParsedScore {
           startTime: currentTrack.currentTime,
           duration: duration,
           velocity: currentTrack.velocity,
+          gateRate: currentTrack.gateRate,
+          gateDuration: duration * currentTrack.gateRate,
           trackId: currentTrack.id,
           channel: currentTrack.channel,
           instrument: currentTrack.instrument,
