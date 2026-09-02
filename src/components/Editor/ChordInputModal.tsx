@@ -9,6 +9,7 @@ import {
   FileText,
   Play,
   RotateCcw,
+  ArrowLeftRight,
 } from 'lucide-react';
 import {
   COMMON_CHORD_TYPES,
@@ -140,6 +141,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
   currentProgram = 0,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('builder');
+  const [panelPosition, setPanelPosition] = useState<'right' | 'left'>('right');
 
   // コードビルダー用状態
   const [builderRoot, setBuilderRoot] = useState<string>('C');
@@ -257,36 +259,52 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-40 pointer-events-none flex items-start justify-end p-2 sm:p-4 pt-16 sm:pt-20">
+    <div
+      className={`fixed top-[104px] bottom-3 z-40 pointer-events-none flex flex-col transition-all duration-200 ${
+        panelPosition === 'right' ? 'right-2 sm:right-4' : 'left-2 sm:left-4'
+      }`}
+    >
       <div
-        className="pointer-events-auto relative w-full sm:w-[410px] bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-76px)] sm:max-h-[calc(100vh-96px)] animate-in slide-in-from-right-4 duration-200"
+        className="pointer-events-auto relative w-[92vw] sm:w-[410px] bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-full max-h-full animate-in fade-in duration-200"
         style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
       >
         {/* ヘッダー */}
-        <div className="flex-shrink-0 flex items-center justify-between px-3.5 sm:px-4 py-2 sm:py-2.5 border-b border-slate-200 bg-slate-50">
+        <div className="flex-shrink-0 flex items-center justify-between px-3.5 sm:px-4 py-2 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center space-x-2">
-            <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+            <div className="p-1 bg-blue-100 text-blue-700 rounded-md">
               <Sparkles className="w-4 h-4 text-blue-600" />
             </div>
             <div>
               <h2 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
                 コード入力パレット
                 <span className="text-[10px] font-normal text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
-                  右側パネル
+                  {panelPosition === 'right' ? '右側' : '左側'}
                 </span>
               </h2>
-              <p className="text-[10px] text-slate-500">
-                テキスト入力と並行してコードを挿入できます
-              </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
-            title="パレットを閉じる"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center space-x-1.5">
+            {/* 左右切替ボタン */}
+            <button
+              type="button"
+              onClick={() => setPanelPosition((prev) => (prev === 'right' ? 'left' : 'right'))}
+              className="flex items-center space-x-1 px-2 py-1 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-md text-[11px] font-semibold text-slate-700 shadow-sm transition-all"
+              title={`パレットを画面の${panelPosition === 'right' ? '左側' : '右側'}へ移動`}
+            >
+              <ArrowLeftRight className="w-3 h-3 text-blue-600" />
+              <span>{panelPosition === 'right' ? '左へ' : '右へ'}</span>
+            </button>
+
+            {/* 閉じるボタン */}
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-md transition-colors"
+              title="パレットを閉じる"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* タブ切り替えボタン */}
@@ -372,7 +390,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                     {builderBass ? ` / ${builderBass}` : ''}
                   </span>
                 </label>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1 sm:gap-1.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   {COMMON_CHORD_TYPES.map((t) => {
                     const isSelected = builderType === t.type;
                     return (
@@ -398,7 +416,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
               </div>
 
               {/* 転回形・オンコード・音長設定 */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
+              <div className="grid grid-cols-3 gap-1.5 pt-0.5">
                 {/* 転回形 */}
                 <div className="space-y-0.5">
                   <label className="text-xs font-bold text-slate-700">ボイシング (展開形):</label>
