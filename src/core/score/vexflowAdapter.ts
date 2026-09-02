@@ -14,6 +14,21 @@ import { getInstrumentByProgram } from '../../constants/instruments';
 
 export type PartNameDisplayMode = 'abbr' | 'abbrJa' | 'multilineJa' | 'trackOnly';
 
+export interface ScoreDisplayOptions {
+  showTitle: boolean;          // 楽譜タイトルを表示するか
+  showTempo: boolean;          // テンポ指示 (♩=120) を表示するか
+  showTimeSignature: boolean;  // 拍子記号 (4/4 等) を表示するか
+  showTrackDetails: boolean;   // パート別の個別指示(テンポ/拍子等)を表示するか
+  customTitle?: string;        // ユーザー指定のカスタムタイトル
+}
+
+export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
+  showTitle: true,
+  showTempo: true,
+  showTimeSignature: true,
+  showTrackDetails: true,
+};
+
 /**
  * 音名文字列 ("C4", "F#5", "Bb3") を VexFlow 形式 ("c/4", "f#/5", "bb/3") に変換
  */
@@ -225,7 +240,8 @@ export function renderScoreToSvg(
   container: HTMLDivElement,
   score: ParsedScore,
   selectedTrackIndex = 0,
-  containerWidth = 800
+  containerWidth = 800,
+  options: ScoreDisplayOptions = DEFAULT_DISPLAY_OPTIONS
 ) {
   container.innerHTML = '';
 
@@ -238,13 +254,42 @@ export function renderScoreToSvg(
     return;
   }
 
-  const beatsPerMeasure = score.timeSignature.numerator || 4;
+  const inst = getInstrumentByProgram(track.instrument);
+  const trackTempo = track.initialTempo || score.tempoEvents[0]?.bpm || 120;
+  const trackTimeSig = track.initialTimeSignature || score.timeSignature;
+  const beatsPerMeasure = trackTimeSig.numerator || 4;
+
+  // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
+  if (options.showTitle) {
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'score-title-header w-full text-center mb-6 pt-1 pb-3 border-b border-slate-200';
+    
+    const titleText = options.customTitle?.trim() || score.title || `${track.name || `Track ${selectedTrackIndex + 1}`}`;
+    
+    const h1 = document.createElement('h1');
+    h1.className = 'text-2xl font-bold tracking-tight text-slate-900 font-serif';
+    h1.textContent = titleText;
+    headerDiv.appendChild(h1);
+
+    const sub = document.createElement('div');
+    sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
+    sub.innerHTML = `
+      <span class="font-semibold text-slate-800">${track.name || `Track ${selectedTrackIndex + 1}`}: ${inst.nameJa}</span>
+      <span class="text-slate-400">|</span>
+      <span>Tempo: ${trackTempo} BPM</span>
+      <span class="text-slate-400">|</span>
+      <span>拍子: ${trackTimeSig.numerator}/${trackTimeSig.denominator}</span>
+    `;
+    headerDiv.appendChild(sub);
+    container.appendChild(headerDiv);
+  }
+
   const measureGroups = groupNotesByMeasure(track, beatsPerMeasure);
 
   const measuresPerRow = containerWidth > 900 ? 3 : containerWidth > 600 ? 2 : 1;
   const staveWidth = Math.floor((containerWidth - 40) / measuresPerRow);
   // 低音加線や高音加線が切れないよう、十分な高さを確保 (150px)
-  const staveHeight = 145;
+  const staveHeight = 150;
   const rowCount = Math.ceil(measureGroups.length / measuresPerRow);
 
   const defaultClef = getTrackClef(track);
@@ -275,14 +320,14 @@ export function renderScoreToSvg(
 
       const mGroup = measureGroups[idx];
       const x = 20 + c * staveWidth;
-      const y = 30; // 上部余白を確保して高音加線を保護
+      const y = 35; // 上部余白を確保してテンポ表示と高音加線を保護
 
       const stave = new Stave(x, y, staveWidth);
 
       if (c === 0) {
         stave.addClef(defaultClef);
-        if (r === 0) {
-          stave.addTimeSignature(`${score.timeSignature.numerator}/${score.timeSignature.denominator}`);
+        if (r === 0 && options.showTimeSignature) {
+          stave.addTimeSignature(`${trackTimeSig.numerator}/${trackTimeSig.denominator}`);
         }
       }
 
@@ -291,6 +336,15 @@ export function renderScoreToSvg(
       }
 
       stave.setContext(ctx).draw();
+
+      // テンポ指示 (メトロノーム記号) 描画
+      if (r === 0 && c === 0 && options.showTempo) {
+        ctx.save();
+        ctx.setFont('sans-serif', 10.5, 'bold');
+        ctx.setFillStyle('#0f172a');
+        ctx.fillText(`♩ = ${trackTempo}`, x + 5, y - 10);
+        ctx.restore();
+      }
 
       const vexNotes = createVexNotesForMeasure(
         mGroup.notes,
@@ -335,7 +389,8 @@ export function renderFullScoreToSvg(
   container: HTMLDivElement,
   score: ParsedScore,
   containerWidth = 850,
-  partNameMode: PartNameDisplayMode = 'abbr'
+  partNameMode: PartNameDisplayMode = 'abbr',
+  options: ScoreDisplayOptions = DEFAULT_DISPLAY_OPTIONS
 ) {
   container.innerHTML = '';
 
@@ -348,7 +403,36 @@ export function renderFullScoreToSvg(
     return;
   }
 
-  const beatsPerMeasure = score.timeSignature.numerator || 4;
+  const globalTempo = score.tempoEvents[0]?.bpm || 120;
+  const globalTimeSig = score.timeSignature;
+  const beatsPerMeasure = globalTimeSig.numerator || 4;
+
+  // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
+  if (options.showTitle) {
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'score-title-header w-full text-center mb-6 pt-1 pb-3 border-b border-slate-200';
+    
+    const titleText = options.customTitle?.trim() || score.title || 'Full Score (総譜)';
+    
+    const h1 = document.createElement('h1');
+    h1.className = 'text-2xl font-bold tracking-tight text-slate-900 font-serif';
+    h1.textContent = titleText;
+    headerDiv.appendChild(h1);
+
+    const sub = document.createElement('div');
+    sub.className = 'flex items-center justify-center space-x-3 text-xs text-slate-600 font-sans mt-1.5';
+    sub.innerHTML = `
+      <span class="font-semibold text-slate-800">全 ${tracks.length} パート</span>
+      <span class="text-slate-400">|</span>
+      <span>Tempo: ${globalTempo} BPM</span>
+      <span class="text-slate-400">|</span>
+      <span>拍子: ${globalTimeSig.numerator}/${globalTimeSig.denominator}</span>
+      <span class="text-slate-400">|</span>
+      <span>総小節数: ${Math.ceil(score.totalDuration / (globalTimeSig.numerator || 4))}</span>
+    `;
+    headerDiv.appendChild(sub);
+    container.appendChild(headerDiv);
+  }
 
   const trackMeasureMaps: Map<number, NoteEvent[]>[] = tracks.map((track) => {
     const mMap = new Map<number, NoteEvent[]>();
@@ -373,9 +457,9 @@ export function renderFullScoreToSvg(
   const leftMargin = partNameMode === 'multilineJa' ? 95 : partNameMode === 'trackOnly' ? 45 : 75;
   const staveWidth = Math.floor((containerWidth - leftMargin - 25) / measuresPerRow);
 
-  // 1パートあたりの高さを 120px に拡大し、低音の加線や符頭が切れるのを完全に防止
-  const trackStaveHeight = 120;
-  const systemHeight = tracks.length * trackStaveHeight + 40;
+  // 1パートあたりの高さを 125px に設定
+  const trackStaveHeight = 125;
+  const systemHeight = tracks.length * trackStaveHeight + 45;
   const rowCount = Math.ceil(totalMeasures / measuresPerRow);
 
   const trackClefs = tracks.map((t) => getTrackClef(t));
@@ -406,14 +490,21 @@ export function renderFullScoreToSvg(
       const stavesInMeasure: Stave[] = [];
 
       tracks.forEach((track, tIdx) => {
-        const staveY = 20 + tIdx * trackStaveHeight;
+        const staveY = 25 + tIdx * trackStaveHeight;
         const stave = new Stave(x, staveY, staveWidth);
         const clef = trackClefs[tIdx];
 
+        // 各パートの拍子・テンポ情報
+        const trackSig = (options.showTrackDetails && track.initialTimeSignature)
+          ? track.initialTimeSignature
+          : score.timeSignature;
+        const trackTempo = track.initialTempo || globalTempo;
+        const hasCustomTempo = track.initialTempo && track.initialTempo !== globalTempo;
+
         if (c === 0) {
           stave.addClef(clef);
-          if (r === 0) {
-            stave.addTimeSignature(`${score.timeSignature.numerator}/${score.timeSignature.denominator}`);
+          if (r === 0 && options.showTimeSignature) {
+            stave.addTimeSignature(`${trackSig.numerator}/${trackSig.denominator}`);
           }
 
           // パート名・楽器名
@@ -453,6 +544,26 @@ export function renderFullScoreToSvg(
 
         stave.setContext(ctx).draw();
         stavesInMeasure.push(stave);
+
+        // テンポ指示の描画
+        if (r === 0 && c === 0 && options.showTempo) {
+          // 最上段（全体テンポ）
+          if (tIdx === 0) {
+            ctx.save();
+            ctx.setFont('sans-serif', 10.5, 'bold');
+            ctx.setFillStyle('#0f172a');
+            ctx.fillText(`♩ = ${globalTempo}`, x + 5, staveY - 8);
+            ctx.restore();
+          }
+          // パート個別のテンポ指示（パート詳細表示が有効で、全体と異なるまたは明示指定されている場合）
+          else if (options.showTrackDetails && hasCustomTempo) {
+            ctx.save();
+            ctx.setFont('sans-serif', 9, 'bold');
+            ctx.setFillStyle('#2563eb');
+            ctx.fillText(`(TR${tIdx + 1}: ♩ = ${trackTempo})`, x + 5, staveY - 6);
+            ctx.restore();
+          }
+        }
 
         // 音符生成
         const notes = trackMeasureMaps[tIdx].get(mIdx) || [];

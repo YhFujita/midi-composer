@@ -53,12 +53,24 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
             </div>
           </div>
 
-          {/* オクターブ・音量・テンポ */}
+          {/* オクターブ・音量・テンポ・メタ情報 */}
           <div>
             <h3 className="text-sm font-semibold text-purple-400 flex items-center mb-2">
               <Play className="w-4 h-4 mr-1.5" /> 2. 演奏設定・コマンド
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                <code className="text-purple-300 font-mono font-bold">Title("曲名") / // 曲名</code>
+                <p className="text-slate-300 mt-1">譜面に表示される曲名タイトルを設定</p>
+              </div>
+              <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                <code className="text-purple-300 font-mono font-bold">Tempo(120) / t120</code>
+                <p className="text-slate-300 mt-1">テンポ設定 (BPM)</p>
+              </div>
+              <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                <code className="text-purple-300 font-mono font-bold">TimeSignature(4,4)</code>
+                <p className="text-slate-300 mt-1">拍子記号設定 (4/4, 3/4 等)</p>
+              </div>
               <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
                 <code className="text-purple-300 font-mono font-bold">o4 / o5 / &gt; / &lt;</code>
                 <p className="text-slate-300 mt-1">オクターブ指定 / &gt;(1オクターブ上) / &lt;(下)</p>
@@ -70,10 +82,6 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
               <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
                 <code className="text-purple-300 font-mono font-bold">v100 / ( / )</code>
                 <p className="text-slate-300 mt-1">音量・ベロシティ指定 (0〜127) / (大きめ / )小さめ</p>
-              </div>
-              <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
-                <code className="text-purple-300 font-mono font-bold">Tempo(120) / t120</code>
-                <p className="text-slate-300 mt-1">テンポ設定 (BPM)</p>
               </div>
             </div>
           </div>

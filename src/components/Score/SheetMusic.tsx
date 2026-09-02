@@ -4,8 +4,20 @@ import {
   renderScoreToSvg,
   renderFullScoreToSvg,
   PartNameDisplayMode,
+  ScoreDisplayOptions,
+  DEFAULT_DISPLAY_OPTIONS,
 } from '../../core/score/vexflowAdapter';
-import { Printer, ZoomIn, ZoomOut, Layers, BookOpen, Tag } from 'lucide-react';
+import {
+  Printer,
+  ZoomIn,
+  ZoomOut,
+  Layers,
+  BookOpen,
+  Tag,
+  SlidersHorizontal,
+  Check,
+  Type,
+} from 'lucide-react';
 import { getInstrumentByProgram } from '../../constants/instruments';
 
 interface SheetMusicProps {
@@ -18,6 +30,7 @@ export type ScoreViewMode = 'score' | 'part';
 
 export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPlaying }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
 
   // 表示モード ('score': 総譜, 'part': パート譜)
   const [viewMode, setViewMode] = useState<ScoreViewMode>('score');
@@ -27,6 +40,56 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
   // パート名表示モード
   const [partNameMode, setPartNameMode] = useState<PartNameDisplayMode>('abbr');
 
+  // 表示設定ドロップダウンメニューの開閉
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // 楽譜表示オプション
+  const [displayOptions, setDisplayOptions] = useState<ScoreDisplayOptions>(() => {
+    try {
+      const saved = localStorage.getItem('midi_composer_score_options');
+      if (saved) {
+        return { ...DEFAULT_DISPLAY_OPTIONS, ...JSON.parse(saved) };
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_DISPLAY_OPTIONS;
+  });
+
+  // オプション変更用ハンドラ
+  const updateDisplayOption = <K extends keyof ScoreDisplayOptions>(
+    key: K,
+    value: ScoreDisplayOptions[K]
+  ) => {
+    setDisplayOptions((prev) => {
+      const updated = { ...prev, [key]: value };
+      try {
+        localStorage.setItem('midi_composer_score_options', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  };
+
+  // メニュー外クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) {
+        setIsSettingsOpen(false);
+      }
+    };
+    if (isSettingsOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSettingsOpen]);
+
+  // コンテナの横幅状態
+  const [containerWidth, setContainerWidth] = useState<number>(800);
+
   // トラック変更時に有効な範囲に調整
   useEffect(() => {
     if (selectedTrack >= score.tracks.length && score.tracks.length > 0) {
@@ -34,26 +97,86 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
     }
   }, [score.tracks.length, selectedTrack]);
 
+  // コンテナ要素の幅を監視（リサイズ・レイアウト切替時に自動追従）
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const updateWidth = () => {
+      if (containerRef.current) {
+        const clientWidth = containerRef.current.clientWidth || containerRef.current.parentElement?.clientWidth || 800;
+        // マージンやパディングを考慮した基本幅 (最低650px)
+        const effectiveWidth = Math.max(650, clientWidth - 48);
+        setContainerWidth(effectiveWidth);
+      }
+    };
+
+    updateWidth();
+
+    // ResizeObserver でコンテナのリサイズを監視
+    const resizeObserver = new ResizeObserver(() => {
+      updateWidth();
+    });
+
+    if (containerRef.current.parentElement) {
+      resizeObserver.observe(containerRef.current.parentElement);
+    }
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // 印刷中状態
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  // 印刷イベント監視
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      setIsPrinting(true);
+    };
+    const handleAfterPrint = () => {
+      setIsPrinting(false);
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
+
   // レンダリング実行（画面表示 ＆ 印刷共通コンテナ）
   useEffect(() => {
     if (!containerRef.current) return;
-    const baseWidth = Math.max(650, containerRef.current.clientWidth || 800);
-    const targetWidth = Math.floor(baseWidth * (zoom / 100));
+    // 印刷時は A4 用紙に最適な 760px、画面時はコンテナ幅 * ズーム
+    const targetWidth = isPrinting ? 760 : Math.floor(containerWidth * (zoom / 100));
 
     if (viewMode === 'score') {
-      renderFullScoreToSvg(containerRef.current, score, targetWidth, partNameMode);
+      renderFullScoreToSvg(containerRef.current, score, targetWidth, partNameMode, displayOptions);
     } else {
-      renderScoreToSvg(containerRef.current, score, selectedTrack, targetWidth);
+      renderScoreToSvg(containerRef.current, score, selectedTrack, targetWidth, displayOptions);
     }
-  }, [score, viewMode, selectedTrack, zoom, partNameMode]);
+  }, [score, viewMode, selectedTrack, zoom, partNameMode, containerWidth, displayOptions, isPrinting]);
 
   const handlePrint = () => {
-    window.print();
+    setIsPrinting(true);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => {
+        setIsPrinting(false);
+      }, 500);
+    }, 60);
   };
 
   const currentMeasure = Math.floor(currentBeat / (score.timeSignature.numerator || 4)) + 1;
   const activeTrack = score.tracks[selectedTrack] || score.tracks[0];
   const activeInst = activeTrack ? getInstrumentByProgram(activeTrack.instrument) : null;
+
+  const currentTitle =
+    displayOptions.customTitle?.trim() ||
+    score.title ||
+    (viewMode === 'score' ? 'Full Score (総譜)' : `${activeTrack?.name || `Track ${selectedTrack + 1}`}: ${activeInst?.nameJa || 'パート譜'}`);
 
   return (
     <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 text-slate-100 score-pane-container">
@@ -113,7 +236,7 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
           </div>
         </div>
 
-        {/* 右エリア: パート名表示設定、ズーム、印刷ボタン */}
+        {/* 右エリア: 表記設定、表示設定ドロップダウン、ズーム、印刷ボタン */}
         <div className="flex items-center space-x-2 ml-auto">
           {/* スコア譜表示時のみ: パート名略記セレクター */}
           {viewMode === 'score' && (
@@ -141,6 +264,94 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
               </select>
             </div>
           )}
+
+          {/* 表示設定ポップオーバー */}
+          <div className="relative" ref={settingsMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors border ${
+                isSettingsOpen
+                  ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+              }`}
+              title="譜面のタイトル・テンポ・拍子等の表示/非表示設定"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" />
+              <span>表示設定</span>
+            </button>
+
+            {isSettingsOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-50 text-xs space-y-3">
+                <div className="font-semibold text-slate-200 border-b border-slate-800 pb-1.5 flex items-center justify-between">
+                  <span>譜面表示オプション</span>
+                  <span className="text-[10px] text-slate-500 font-normal">自動保存</span>
+                </div>
+
+                {/* カスタムタイトル入力 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400 flex items-center space-x-1">
+                    <Type className="w-3 h-3 text-blue-400" />
+                    <span>曲名タイトル:</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={displayOptions.customTitle || ''}
+                    placeholder={score.title || '曲名 (未入力時は自動検出)'}
+                    onChange={(e) => updateDisplayOption('customTitle', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* トグル項目リスト */}
+                <div className="space-y-1.5 pt-1">
+                  {/* タイトル表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-800/80 cursor-pointer select-none">
+                    <span className="text-slate-300">楽譜タイトルを表示</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showTitle}
+                      onChange={(e) => updateDisplayOption('showTitle', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
+                  {/* テンポ表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-800/80 cursor-pointer select-none">
+                    <span className="text-slate-300">テンポ指示を表示 (♩ = BPM)</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showTempo}
+                      onChange={(e) => updateDisplayOption('showTempo', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
+                  {/* 拍子記号表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-800/80 cursor-pointer select-none">
+                    <span className="text-slate-300">拍子記号を表示 (4/4, 3/4 等)</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showTimeSignature}
+                      onChange={(e) => updateDisplayOption('showTimeSignature', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
+                  {/* パート個別指示 (スコア譜) */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-800/80 cursor-pointer select-none">
+                    <span className="text-slate-300">パート別の個別テンポ/拍子を表示</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showTrackDetails}
+                      onChange={(e) => updateDisplayOption('showTrackDetails', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
 
           {isPlaying && (
             <div className="hidden xl:flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-full animate-pulse">
@@ -181,28 +392,15 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
       </div>
 
       {/* 五線譜表示コンテナ (画面表示および印刷・PDF出力の両方に共通で使用) */}
-      <div className="flex-1 overflow-auto p-4 bg-slate-900 flex flex-col items-center print:p-0 print:bg-white print:overflow-visible">
-        {/* 印刷時のみ表示されるヘッダー */}
-        <div className="hidden print-header w-full text-center mb-6 pb-2 border-b border-gray-300">
-          <h1 className="text-2xl font-bold text-black mb-1">
-            {viewMode === 'score'
-              ? 'Full Score (総譜)'
-              : `${activeTrack?.name || `Track ${selectedTrack + 1}`}: ${activeInst?.nameJa || 'パート譜'}`}
-          </h1>
-          <p className="text-xs text-gray-600">
-            Tempo: {score.tempoEvents[0]?.bpm || 120} BPM | Time Signature:{' '}
-            {score.timeSignature.numerator}/{score.timeSignature.denominator} | Total Measures:{' '}
-            {Math.ceil(score.totalDuration / (score.timeSignature.numerator || 4))}
-          </p>
-        </div>
-
-        {/* 楽譜描画エリア */}
+      <div className="flex-1 overflow-auto p-4 bg-slate-900 flex flex-col items-center print:p-0 print:m-0 print:bg-white print:overflow-visible print:w-full print:block">
+        {/* 楽譜描画エリア (タイトル・ヘッダーもこの内部で統一描画) */}
         <div
           ref={containerRef}
-          className="bg-white rounded-xl shadow-2xl p-6 min-w-[550px] max-w-full overflow-x-auto text-slate-900 border border-slate-200 print:shadow-none print:border-none print:p-0 print:min-w-0 print:overflow-visible print:w-full"
+          className="bg-white rounded-xl shadow-2xl p-6 min-w-[550px] max-w-full overflow-x-auto text-slate-900 border border-slate-200 print:shadow-none print:border-none print:p-0 print:m-0 print:min-w-0 print:max-w-none print:overflow-visible print:w-full print:block"
           style={{ transformOrigin: 'top center' }}
         />
       </div>
     </div>
   );
 };
+

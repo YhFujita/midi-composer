@@ -35,6 +35,10 @@ export interface Track {
   channel: number;
   instrument: number;  // General MIDI Program (0: Acoustic Grand Piano, etc.)
   notes: NoteEvent[];
+  tempoEvents?: TempoEvent[];
+  timeSignatureEvents?: TimeSignatureEvent[];
+  initialTempo?: number;
+  initialTimeSignature?: { numerator: number; denominator: number };
 }
 
 export interface ParseError {
@@ -44,6 +48,7 @@ export interface ParseError {
 }
 
 export interface ParsedScore {
+  title?: string;
   tracks: Track[];
   tempoEvents: TempoEvent[];
   timeSignature: { numerator: number; denominator: number };

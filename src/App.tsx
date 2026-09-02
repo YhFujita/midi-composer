@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Header } from './components/Layout/Header';
+import { Header, LayoutOrientation } from './components/Layout/Header';
 import { ControlBar } from './components/Transport/ControlBar';
 import { MmlEditor } from './components/Editor/MmlEditor';
 import { SheetMusic } from './components/Score/SheetMusic';
@@ -17,6 +17,17 @@ export const App: React.FC = () => {
   const [mmlText, setMmlText] = useState<string>(PRESET_SONGS[0].mml);
   const [currentFilename, setCurrentFilename] = useState<string>('twinkle_star.mml');
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
+
+  // レイアウト分割方向 ('horizontal': 左右分割, 'vertical': 上下分割)
+  const [layoutOrientation, setLayoutOrientation] = useState<LayoutOrientation>(() => {
+    const saved = localStorage.getItem('midi_composer_layout');
+    return saved === 'vertical' ? 'vertical' : 'horizontal';
+  });
+
+  const handleLayoutChange = useCallback((layout: LayoutOrientation) => {
+    setLayoutOrientation(layout);
+    localStorage.setItem('midi_composer_layout', layout);
+  }, []);
 
   // 再生状態
   const [isPlaying, setIsPlaying] = useState(false);
@@ -198,10 +209,16 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
+  const isHorizontal = layoutOrientation === 'horizontal';
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
       {/* ヘッダー */}
-      <Header onOpenGuide={() => setIsGuideOpen(true)} />
+      <Header
+        onOpenGuide={() => setIsGuideOpen(true)}
+        layoutOrientation={layoutOrientation}
+        onChangeLayout={handleLayoutChange}
+      />
 
       {/* コントロールバー (再生・停止・エクスポート・ファイル操作) */}
       <ControlBar
@@ -226,10 +243,20 @@ export const App: React.FC = () => {
         mp3Progress={mp3Progress}
       />
 
-      {/* メインエリア: 2分割レイアウト (左: MMLエディタ, 右: 五線譜ビュー) */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* 左ペイン: Monaco Editor + エラーステータス */}
-        <div className="no-print w-full md:w-1/2 h-1/2 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800">
+      {/* メインエリア: 分割レイアウト (左右分割 または 上下分割) */}
+      <div
+        className={`flex-1 flex ${
+          isHorizontal ? 'flex-row' : 'flex-col'
+        } overflow-hidden relative print:block print:w-full print:h-auto print:overflow-visible`}
+      >
+        {/* エディタペイン: Monaco Editor + エラーステータス */}
+        <div
+          className={`no-print flex flex-col ${
+            isHorizontal
+              ? 'w-1/2 h-full border-r border-slate-800'
+              : 'w-full h-1/2 border-b border-slate-800'
+          }`}
+        >
           <div className="flex-1 overflow-hidden">
             <MmlEditor
               value={mmlText}
@@ -257,8 +284,12 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 右ペイン: 五線譜ビューア (A4印刷対応) */}
-        <div className="w-full md:w-1/2 h-1/2 md:h-full overflow-hidden flex flex-col">
+        {/* 楽譜ペイン: 五線譜ビューア (A4印刷対応) */}
+        <div
+          className={`${
+            isHorizontal ? 'w-1/2 h-full' : 'w-full h-1/2'
+          } overflow-hidden flex flex-col print:block print:w-full print:h-auto print:overflow-visible`}
+        >
           <SheetMusic
             score={parsedScore}
             currentBeat={currentBeat}
@@ -277,3 +308,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+

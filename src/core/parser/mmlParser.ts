@@ -11,6 +11,8 @@ interface TrackState {
   velocity: number;
   currentTime: number; // 4分音符基準の累積時間
   notes: NoteEvent[];
+  tempoEvents: TempoEvent[];
+  timeSignatureEvents: TimeSignatureEvent[];
 }
 
 export function parseMML(mmlCode: string): ParsedScore {
@@ -18,6 +20,7 @@ export function parseMML(mmlCode: string): ParsedScore {
   const tracksMap = new Map<number, TrackState>();
   const tempoEvents: TempoEvent[] = [{ time: 0, bpm: 120 }];
   const timeSignatures: TimeSignatureEvent[] = [{ time: 0, numerator: 4, denominator: 4 }];
+  let scoreTitle: string | undefined;
 
   // デフォルトの第1トラック(ID: 0)を初期化
   function getOrCreateTrack(trackId: number): TrackState {
@@ -32,6 +35,8 @@ export function parseMML(mmlCode: string): ParsedScore {
         velocity: 100,
         currentTime: 0,
         notes: [],
+        tempoEvents: [],
+        timeSignatureEvents: [],
       });
     }
     return tracksMap.get(trackId)!;
@@ -41,10 +46,30 @@ export function parseMML(mmlCode: string): ParsedScore {
   let currentTrack = getOrCreateTrack(currentTrackId);
 
   // コメントの除去と位置情報の保持
-  // 行ごとにパースするか、ストリームとしてパースする
   const lines = mmlCode.split('\n');
-
   let inBlockComment = false;
+
+  // 先頭コメントからタイトル候補を抽出
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!scoreTitle && trimmed.startsWith('//')) {
+      const commentContent = trimmed.replace(/^\/\/\s*/, '').trim();
+      // "テンポ" や "Track" やディレクティブで始まらない最初のコメントをタイトル候補とする
+      if (
+        commentContent &&
+        !commentContent.startsWith('テンポ') &&
+        !commentContent.startsWith('Tempo') &&
+        !commentContent.startsWith('Track') &&
+        !commentContent.startsWith('TR') &&
+        !commentContent.startsWith('Voice')
+      ) {
+        scoreTitle = commentContent.replace(/^Title[:\s=]*/i, '').trim();
+        break;
+      }
+    } else if (trimmed && !trimmed.startsWith('//') && !trimmed.startsWith('/*')) {
+      break;
+    }
+  }
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const rawLine = lines[lineIndex];
@@ -91,28 +116,45 @@ export function parseMML(mmlCode: string): ParsedScore {
         continue;
       }
 
-      // 0.1 文字列設定 (Title = "...", TrackName = "...")
+      // 0.1 タイトル設定: Title("..."), Title = "..."
+      const titleMatch = remaining.match(/^(?:Title\s*\(?\s*["'「]([^"'」]+)["'」]\s*\)?|Title\s*=\s*"([^"]*)")/i);
+      if (titleMatch) {
+        scoreTitle = (titleMatch[1] || titleMatch[2] || '').trim();
+        col += titleMatch[0].length;
+        continue;
+      }
+
+      // 0.2 トラック名設定: TrackName("..."), TrackName = "...", Name("...")
+      const trackNameMatch = remaining.match(/^(?:(?:TrackName|Name)\s*\(?\s*["'「]([^"'」]+)["'」]\s*\)?|(?:TrackName|Name)\s*=\s*"([^"]*)")/i);
+      if (trackNameMatch) {
+        const tName = (trackNameMatch[1] || trackNameMatch[2] || '').trim();
+        if (tName) currentTrack.name = tName;
+        col += trackNameMatch[0].length;
+        continue;
+      }
+
+      // 0.3 その他文字列設定
       const strAssignMatch = remaining.match(/^[a-zA-Z_]+\s*=\s*"[^"]*"/);
       if (strAssignMatch) {
         col += strAssignMatch[0].length;
         continue;
       }
 
-      // 0.2 ドットコマンド (System.Time 等)
+      // 0.4 ドットコマンド (System.Time 等)
       const dotCmdMatch = remaining.match(/^[a-zA-Z_]+\.[a-zA-Z_]+\s*(\([^)]*\))?/);
       if (dotCmdMatch) {
         col += dotCmdMatch[0].length;
         continue;
       }
 
-      // 0.3 ゲートタイム (q8, q100, Gate(8))
+      // 0.5 ゲートタイム (q8, q100, Gate(8))
       const gateMatch = remaining.match(/^(?:q\s*\d+|GATE\(?=?\s*\d+\)?)/i);
       if (gateMatch) {
         col += gateMatch[0].length;
         continue;
       }
 
-      // 0.4 パン・モジュレーション (p64, Pan(64), m0)
+      // 0.6 パン・モジュレーション (p64, Pan(64), m0)
       const panModMatch = remaining.match(/^(?:(?:PAN|MOD)\(?=?\s*\d+\)?|[pm]\s*\d+)/i);
       if (panModMatch) {
         col += panModMatch[0].length;
@@ -123,7 +165,6 @@ export function parseMML(mmlCode: string): ParsedScore {
       const trackMatch = remaining.match(/^(?:TR(?:ACK)?\(?=?\s*(\d+)\)?)/i);
       if (trackMatch) {
         const rawTrNum = parseInt(trackMatch[1], 10);
-        // 1-indexed to 0-indexed if > 0
         currentTrackId = rawTrNum > 0 ? rawTrNum - 1 : 0;
         currentTrack = getOrCreateTrack(currentTrackId);
         col += trackMatch[0].length;
@@ -153,10 +194,12 @@ export function parseMML(mmlCode: string): ParsedScore {
       if (tempoMatch) {
         const bpm = parseInt(tempoMatch[1] || tempoMatch[2], 10);
         if (bpm >= 20 && bpm <= 400) {
-          tempoEvents.push({
+          const tEvent = {
             time: currentTrack.currentTime,
             bpm,
-          });
+          };
+          tempoEvents.push(tEvent);
+          currentTrack.tempoEvents.push(tEvent);
         }
         col += tempoMatch[0].length;
         continue;
@@ -167,11 +210,13 @@ export function parseMML(mmlCode: string): ParsedScore {
       if (timeSigMatch) {
         const num = parseInt(timeSigMatch[1], 10);
         const den = parseInt(timeSigMatch[2], 10);
-        timeSignatures.push({
+        const sigEvent = {
           time: currentTrack.currentTime,
           numerator: num,
           denominator: den,
-        });
+        };
+        timeSignatures.push(sigEvent);
+        currentTrack.timeSignatureEvents.push(sigEvent);
         col += timeSigMatch[0].length;
         continue;
       }
@@ -359,13 +404,23 @@ export function parseMML(mmlCode: string): ParsedScore {
   }
 
   // トラックリストの整形
-  const tracks: Track[] = Array.from(tracksMap.values()).map((ts) => ({
-    id: ts.id,
-    name: ts.name,
-    channel: ts.channel,
-    instrument: ts.instrument,
-    notes: ts.notes.sort((a, b) => a.startTime - b.startTime),
-  }));
+  const tracks: Track[] = Array.from(tracksMap.values()).map((ts) => {
+    const sortedTempo = ts.tempoEvents.sort((a, b) => a.time - b.time);
+    const sortedTimeSig = ts.timeSignatureEvents.sort((a, b) => a.time - b.time);
+    return {
+      id: ts.id,
+      name: ts.name,
+      channel: ts.channel,
+      instrument: ts.instrument,
+      notes: ts.notes.sort((a, b) => a.startTime - b.startTime),
+      tempoEvents: sortedTempo,
+      timeSignatureEvents: sortedTimeSig,
+      initialTempo: sortedTempo[0]?.bpm,
+      initialTimeSignature: sortedTimeSig[0]
+        ? { numerator: sortedTimeSig[0].numerator, denominator: sortedTimeSig[0].denominator }
+        : undefined,
+    };
+  });
 
   // 全体の総拍数
   let maxDuration = 0;
@@ -381,6 +436,7 @@ export function parseMML(mmlCode: string): ParsedScore {
   const activeTimeSig = timeSignatures[timeSignatures.length - 1] || { numerator: 4, denominator: 4 };
 
   return {
+    title: scoreTitle,
     tracks,
     tempoEvents: tempoEvents.sort((a, b) => a.time - b.time),
     timeSignature: {
