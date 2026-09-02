@@ -257,20 +257,20 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 pt-6 sm:pt-10 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
       <div
-        className="relative w-full max-w-2xl bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-2xl bg-white border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100vh-48px)] sm:max-h-[calc(100vh-72px)]"
         style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
       >
         {/* ヘッダー */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 bg-slate-50">
+        <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-5 py-2.5 sm:py-3 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center space-x-2">
             <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">コード簡易入力パレット</h2>
-              <p className="text-[11px] text-slate-500">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900">コード簡易入力パレット</h2>
+              <p className="text-[10px] sm:text-[11px] text-slate-500">
                 和音・コードネームを選択してエディタのカーソル位置へ挿入します
               </p>
             </div>
@@ -284,7 +284,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
         </div>
 
         {/* タブ切り替えボタン */}
-        <div className="flex items-center space-x-1 px-5 pt-3 pb-2 border-b border-slate-200 bg-white">
+        <div className="flex-shrink-0 flex items-center space-x-1 px-4 sm:px-5 pt-2.5 pb-2 border-b border-slate-200 bg-white">
           <button
             type="button"
             onClick={() => setActiveTab('builder')}
@@ -323,16 +323,16 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
           </button>
         </div>
 
-        {/* コンテンツエリア */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-[#f8fafc]">
+        {/* コンテンツエリア (min-h-0 で内部スクロールを保証) */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3.5 bg-[#f8fafc]">
           {/* 1. コードビルダー タブ */}
           {activeTab === 'builder' && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {/* ルート音選択 */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
                   <span>ルート音 (根音):</span>
-                  <span className="text-blue-600 font-mono text-sm">{builderRoot}</span>
+                  <span className="text-blue-600 font-mono text-xs font-bold">{builderRoot}</span>
                 </label>
                 <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
                   {ROOT_NOTES.map((r) => {
@@ -342,14 +342,14 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                         key={r.name}
                         type="button"
                         onClick={() => setBuilderRoot(r.name)}
-                        className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                        className={`py-1 sm:py-1.5 text-xs font-bold rounded-md sm:rounded-lg border transition-all ${
                           isSelected
                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm ring-2 ring-blue-400'
                             : 'bg-white text-slate-800 border-slate-300 hover:border-blue-400 hover:bg-blue-50'
                         }`}
                       >
                         <div>{r.name}</div>
-                        {r.alt && <div className="text-[9px] opacity-75 font-normal">({r.alt})</div>}
+                        {r.alt && <div className="text-[8px] opacity-75 font-normal">({r.alt})</div>}
                       </button>
                     );
                   })}
@@ -357,16 +357,16 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
               </div>
 
               {/* コードタイプ選択 */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
                   <span>コード種別 (和音の種類):</span>
-                  <span className="text-blue-600 font-mono text-sm">
+                  <span className="text-blue-600 font-mono text-xs font-bold">
                     {builderRoot}
                     {builderType || '(Major)'}
                     {builderBass ? ` / ${builderBass}` : ''}
                   </span>
                 </label>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1 sm:gap-1.5">
                   {COMMON_CHORD_TYPES.map((t) => {
                     const isSelected = builderType === t.type;
                     return (
@@ -374,7 +374,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                         key={t.type}
                         type="button"
                         onClick={() => setBuilderType(t.type)}
-                        className={`p-2 rounded-lg border text-left transition-all ${
+                        className={`p-1.5 rounded-lg border text-left transition-all ${
                           isSelected
                             ? 'bg-blue-50 border-blue-600 ring-2 ring-blue-500 shadow-sm'
                             : 'bg-white border-slate-300 hover:border-blue-300 hover:bg-slate-50'
@@ -384,7 +384,7 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                           {builderRoot}
                           {t.type}
                         </div>
-                        <div className="text-[10px] text-slate-500">{t.nameJa}</div>
+                        <div className="text-[9px] text-slate-500 truncate">{t.nameJa}</div>
                       </button>
                     );
                   })}
@@ -392,14 +392,14 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
               </div>
 
               {/* 転回形・オンコード・音長設定 */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
                 {/* 転回形 */}
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-xs font-bold text-slate-700">ボイシング (展開形):</label>
                   <select
                     value={builderInversion}
                     onChange={(e) => setBuilderInversion(parseInt(e.target.value, 10))}
-                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-2 outline-none font-medium shadow-sm"
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-1.5 outline-none font-medium shadow-sm"
                   >
                     <option value={0}>基本形 (Root Position)</option>
                     <option value={1}>第1展開形 (1st Inversion)</option>
@@ -409,12 +409,12 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                 </div>
 
                 {/* オンコード (ベース音) */}
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-xs font-bold text-slate-700">オンコード (分数ベース):</label>
                   <select
                     value={builderBass}
                     onChange={(e) => setBuilderBass(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-2 outline-none font-medium shadow-sm"
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-1.5 outline-none font-medium shadow-sm"
                   >
                     <option value="">なし (通常)</option>
                     {ROOT_NOTES.map((r) => (
@@ -426,12 +426,12 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                 </div>
 
                 {/* 音長 */}
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-xs font-bold text-slate-700">音の長さ (Duration):</label>
                   <select
                     value={builderDuration}
                     onChange={(e) => setBuilderDuration(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-2 outline-none font-medium shadow-sm"
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-lg p-1.5 outline-none font-medium shadow-sm"
                   >
                     {DURATION_OPTIONS.map((d) => (
                       <option key={d.value} value={d.value}>
@@ -583,24 +583,13 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                   ))}
                 </div>
               </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleInsertProgression}
-                  className="w-full flex items-center justify-center space-x-2 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-md transition-all text-xs"
-                >
-                  <CornerDownLeft className="w-4 h-4" />
-                  <span>このコード進行をMML和音に変換して挿入</span>
-                </button>
-              </div>
             </div>
           )}
         </div>
 
-        {/* フッター（コードビルダー選択時のMMLプレビュー＆挿入アクション） */}
+        {/* 固定フッター（アクションボタン） */}
         {activeTab === 'builder' && (
-          <div className="flex flex-wrap items-center justify-between px-5 py-3 border-t border-slate-200 bg-slate-50 gap-3">
+          <div className="flex-shrink-0 flex flex-wrap items-center justify-between px-4 sm:px-5 py-2.5 border-t border-slate-200 bg-slate-50 gap-2">
             {/* 生成プレビュー */}
             <div className="flex items-center space-x-2">
               <span className="text-xs text-slate-600 font-semibold">生成MML:</span>
@@ -630,6 +619,22 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
                 <span>現在の位置へ挿入</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'progression' && (
+          <div className="flex-shrink-0 flex items-center justify-between px-4 sm:px-5 py-2.5 border-t border-slate-200 bg-slate-50">
+            <span className="text-[11px] text-slate-500 hidden sm:inline">
+              入力されたコードをMMLに一括変換してカーソル位置に挿入します
+            </span>
+            <button
+              type="button"
+              onClick={handleInsertProgression}
+              className="flex items-center space-x-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-bold rounded-lg text-xs shadow-md transition-all ml-auto"
+            >
+              <CornerDownLeft className="w-3.5 h-3.5" />
+              <span>コード進行をMML和音に変換して挿入</span>
+            </button>
           </div>
         )}
       </div>
