@@ -12,6 +12,8 @@ import {
 import { ParsedScore, Track, NoteEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 
+import { detectChordsForMeasure, ChordDetectionGranularity } from './chordDetector';
+
 export type PartNameDisplayMode = 'abbr' | 'abbrJa' | 'multilineJa' | 'trackOnly';
 
 export interface ScoreDisplayOptions {
@@ -20,6 +22,9 @@ export interface ScoreDisplayOptions {
   showTimeSignature: boolean;  // 拍子記号 (4/4 等) を表示するか
   showTrackDetails: boolean;   // パート別の個別指示(テンポ/拍子等)を表示するか
   customTitle?: string;        // ユーザー指定のカスタムタイトル
+  showChords: boolean;         // コードネームを表示するか
+  chordGranularity: ChordDetectionGranularity; // 'measure' | 'two-beats' | 'beat' | 'auto'
+  chordTrackSource: 'all' | 'selected';       // 総譜時のコード解析対象
 }
 
 export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
@@ -27,6 +32,9 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   showTempo: true,
   showTimeSignature: true,
   showTrackDetails: true,
+  showChords: true,
+  chordGranularity: 'auto',
+  chordTrackSource: 'all',
 };
 
 /**
@@ -346,6 +354,37 @@ export function renderScoreToSvg(
         ctx.restore();
       }
 
+      // コードネーム (和音記号) 描画
+      if (options.showChords) {
+        const chords = detectChordsForMeasure(
+          mGroup.notes,
+          mGroup.measureIndex,
+          beatsPerMeasure,
+          options.chordGranularity || 'auto'
+        );
+
+        if (chords.length > 0) {
+          ctx.save();
+          ctx.setFont('sans-serif', 11.5, 'bold');
+          ctx.setFillStyle('#1d4ed8');
+
+          const startPad = c === 0 ? 65 : 18;
+          const usableWidth = staveWidth - startPad - 15;
+
+          chords.forEach((ci) => {
+            const beatRatio = Math.max(0, Math.min(1, ci.beatOffset / beatsPerMeasure));
+            const chordX = x + startPad + usableWidth * beatRatio;
+            let chordY = y - 10;
+            if (r === 0 && c === 0 && options.showTempo && ci.beatOffset < 1.0) {
+              chordY = y - 24;
+            }
+            ctx.fillText(ci.chord.chordName, chordX, chordY);
+          });
+
+          ctx.restore();
+        }
+      }
+
       const vexNotes = createVexNotesForMeasure(
         mGroup.notes,
         mGroup.measureIndex,
@@ -561,6 +600,42 @@ export function renderFullScoreToSvg(
             ctx.setFont('sans-serif', 9, 'bold');
             ctx.setFillStyle('#2563eb');
             ctx.fillText(`(TR${tIdx + 1}: ♩ = ${trackTempo})`, x + 5, staveY - 6);
+            ctx.restore();
+          }
+        }
+
+        // コードネーム (和音記号) 描画 (最上段に全パート合算または第1パートから推定して表示)
+        if (tIdx === 0 && options.showChords) {
+          const targetNotes: NoteEvent[] =
+            options.chordTrackSource === 'all'
+              ? tracks.flatMap((_, i) => trackMeasureMaps[i].get(mIdx) || [])
+              : trackMeasureMaps[0].get(mIdx) || [];
+
+          const chords = detectChordsForMeasure(
+            targetNotes,
+            mIdx,
+            beatsPerMeasure,
+            options.chordGranularity || 'auto'
+          );
+
+          if (chords.length > 0) {
+            ctx.save();
+            ctx.setFont('sans-serif', 11.5, 'bold');
+            ctx.setFillStyle('#1d4ed8');
+
+            const startPad = c === 0 ? 65 : 18;
+            const usableWidth = staveWidth - startPad - 15;
+
+            chords.forEach((ci) => {
+              const beatRatio = Math.max(0, Math.min(1, ci.beatOffset / beatsPerMeasure));
+              const chordX = x + startPad + usableWidth * beatRatio;
+              let chordY = staveY - 10;
+              if (r === 0 && c === 0 && options.showTempo && ci.beatOffset < 1.0) {
+                chordY = staveY - 24;
+              }
+              ctx.fillText(ci.chord.chordName, chordX, chordY);
+            });
+
             ctx.restore();
           }
         }

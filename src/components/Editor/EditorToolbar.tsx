@@ -19,6 +19,7 @@ interface EditorToolbarProps {
   selectedProgram: number;
   onSelectProgram: (program: number) => void;
   onOpenModal: () => void;
+  onOpenChordModal: () => void;
   onInsertToEditor: (program: number, format: InsertFormatType) => void;
   formatType: InsertFormatType;
   onChangeFormatType: (format: InsertFormatType) => void;
@@ -28,6 +29,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   selectedProgram,
   onSelectProgram,
   onOpenModal,
+  onOpenChordModal,
   onInsertToEditor,
   formatType,
   onChangeFormatType,
@@ -98,6 +100,20 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             ))}
           </select>
         </div>
+
+        <span className="text-slate-600 hidden sm:inline px-0.5">|</span>
+
+        {/* コード入力ボタン: 白背景・不透明・黒文字 */}
+        <button
+          type="button"
+          onClick={onOpenChordModal}
+          className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-300 rounded-md transition-all text-xs font-bold text-slate-900 shadow-sm group"
+          style={{ backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 }}
+          title="コード簡易入力パレットを開く (コードビルダー・ダイアトニックコード・コード進行一括展開)"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <span>コード入力</span>
+        </button>
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

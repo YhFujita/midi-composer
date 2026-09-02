@@ -3,6 +3,7 @@ import Editor, { Monaco } from '@monaco-editor/react';
 import { ParseError } from '../../types/mml';
 import { EditorToolbar } from './EditorToolbar';
 import { InstrumentSelectorModal, InsertFormatType } from './InstrumentSelectorModal';
+import { ChordInputModal } from './ChordInputModal';
 import { getInstrumentByProgram } from '../../constants/instruments';
 
 interface MmlEditorProps {
@@ -18,6 +19,7 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
   // 選択中の楽器・モーダル状態
   const [selectedProgram, setSelectedProgram] = useState<number>(0);
   const [isInstrumentModalOpen, setIsInstrumentModalOpen] = useState<boolean>(false);
+  const [isChordModalOpen, setIsChordModalOpen] = useState<boolean>(false);
   const [formatType, setFormatType] = useState<InsertFormatType>('with-comment');
 
   const handleEditorWillMount = (monaco: Monaco) => {
@@ -239,13 +241,73 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
     []
   );
 
+  // コード簡易入力モーダルからの和音MML挿入処理
+  const insertChordCode = useCallback((mmlChordText: string) => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const selection = editor.getSelection();
+    if (!selection) return;
+
+    const targetRange = selection;
+    let textToInsert = mmlChordText;
+
+    // 前後のスマートスペーシング
+    if (selection.isEmpty()) {
+      const startPos = selection.getStartPosition();
+      const endPos = selection.getEndPosition();
+
+      let prefix = '';
+      if (startPos.column > 1) {
+        const charBefore = model.getValueInRange({
+          startLineNumber: startPos.line,
+          startColumn: startPos.column - 1,
+          endLineNumber: startPos.line,
+          endColumn: startPos.column,
+        });
+        if (charBefore && !/\s/.test(charBefore)) {
+          prefix = ' ';
+        }
+      }
+
+      let suffix = '';
+      const lineMaxCol = model.getLineMaxColumn(endPos.line);
+      if (endPos.column < lineMaxCol) {
+        const charAfter = model.getValueInRange({
+          startLineNumber: endPos.line,
+          startColumn: endPos.column,
+          endLineNumber: endPos.line,
+          endColumn: endPos.column + 1,
+        });
+        if (charAfter && !/\s/.test(charAfter)) {
+          suffix = ' ';
+        }
+      }
+
+      textToInsert = prefix + mmlChordText + suffix;
+    }
+
+    editor.executeEdits('chord-insert', [
+      {
+        range: targetRange,
+        text: textToInsert,
+        forceMoveMarkers: true,
+      },
+    ]);
+
+    editor.focus();
+  }, []);
+
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">
-      {/* エディタ上部ツールバー: 楽器選択・出力ボタン */}
+      {/* エディタ上部ツールバー: 楽器選択・コード入力・出力ボタン */}
       <EditorToolbar
         selectedProgram={selectedProgram}
         onSelectProgram={setSelectedProgram}
         onOpenModal={() => setIsInstrumentModalOpen(true)}
+        onOpenChordModal={() => setIsChordModalOpen(true)}
         onInsertToEditor={insertInstrumentCode}
         formatType={formatType}
         onChangeFormatType={setFormatType}
@@ -282,6 +344,14 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
         currentProgram={selectedProgram}
         onSelectInstrument={setSelectedProgram}
         onInsertToEditor={insertInstrumentCode}
+      />
+
+      {/* コード簡易入力モーダルパレット */}
+      <ChordInputModal
+        isOpen={isChordModalOpen}
+        onClose={() => setIsChordModalOpen(false)}
+        onInsertChord={insertChordCode}
+        currentProgram={selectedProgram}
       />
     </div>
   );

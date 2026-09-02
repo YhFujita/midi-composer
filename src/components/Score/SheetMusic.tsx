@@ -354,6 +354,61 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                       className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
                     />
                   </label>
+
+                  {/* コードネーム表示 */}
+                  <div className="border-t border-slate-200 pt-2 mt-1 space-y-2">
+                    <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
+                      <div className="flex flex-col">
+                        <span className="text-slate-900 font-bold flex items-center">
+                          <span className="w-2 h-2 rounded-full bg-blue-600 mr-1.5"></span>
+                          コードネームを表示
+                        </span>
+                        <span className="text-[10px] text-slate-500">五線譜の上に和音記号を表示</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={displayOptions.showChords}
+                        onChange={(e) => updateDisplayOption('showChords', e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                      />
+                    </label>
+
+                    {displayOptions.showChords && (
+                      <div className="pl-3.5 space-y-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-slate-700 font-medium">解析の単位:</span>
+                          <select
+                            value={displayOptions.chordGranularity || 'auto'}
+                            onChange={(e) =>
+                              updateDisplayOption('chordGranularity', e.target.value as any)
+                            }
+                            className="bg-white border border-slate-300 text-slate-900 text-[11px] rounded px-1.5 py-0.5 outline-none font-medium"
+                          >
+                            <option value="auto">自動 (変化タイミング)</option>
+                            <option value="measure">小節ごと (1小節1つ)</option>
+                            <option value="two-beats">2拍ごと (半小節単位)</option>
+                            <option value="beat">毎拍 (1拍ごと)</option>
+                          </select>
+                        </div>
+
+                        {viewMode === 'score' && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-700 font-medium">総譜の解析対象:</span>
+                            <select
+                              value={displayOptions.chordTrackSource || 'all'}
+                              onChange={(e) =>
+                                updateDisplayOption('chordTrackSource', e.target.value as any)
+                              }
+                              className="bg-white border border-slate-300 text-slate-900 text-[11px] rounded px-1.5 py-0.5 outline-none font-medium"
+                            >
+                              <option value="all">全パート合算 (伴奏+ベース)</option>
+                              <option value="selected">第1パートのみ</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

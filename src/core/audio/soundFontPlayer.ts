@@ -621,6 +621,33 @@ export class AudioEngine {
       this.scheduleNote(ctx, dummyNote, instrument, now + n.offset, n.dur, masterGain);
     });
   }
+
+  /**
+   * 指定したMIDIノート群のコードプレビュー演奏（アルペジオ風に重ねて鳴らす）
+   */
+  public previewChord(midiNotes: number[], instrument = 0) {
+    const ctx = this.initAudioContext();
+    const now = ctx.currentTime;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.45, now);
+    masterGain.connect(ctx.destination);
+
+    const sorted = [...midiNotes].sort((a, b) => a - b);
+    sorted.forEach((midi, idx) => {
+      const dummyNote: NoteEvent = {
+        pitch: '',
+        midiNote: midi,
+        startTime: 0,
+        duration: 1,
+        velocity: 95,
+        trackId: 0,
+        channel: 1,
+      };
+      const offset = idx * 0.05;
+      const dur = 1.2 - offset;
+      this.scheduleNote(ctx, dummyNote, instrument, now + offset, Math.max(0.4, dur), masterGain);
+    });
+  }
 }
 
 export const audioEngine = new AudioEngine();
