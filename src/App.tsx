@@ -6,19 +6,27 @@ import { SheetMusic } from './components/Score/SheetMusic';
 import { PianoKeyboardPanel } from './components/Keyboard/PianoKeyboardPanel';
 import { MmlGuideModal } from './components/Editor/MmlGuideModal';
 import { SoundFontModal } from './components/SoundFont/SoundFontModal';
+import { MidiImportModal } from './components/MidiImport/MidiImportModal';
 import { parseMML, findBeatAtCursor } from './core/parser/mmlParser';
 import { generateMidiBlob } from './core/midi/midiGenerator';
+import { parseMidiFile, ParsedMidiData } from './core/midi/midiParser';
+import { convertMidiToMml } from './core/midi/midiToMml';
 import { audioEngine } from './core/audio/soundFontPlayer';
 import { exportToMp3 } from './core/audio/mp3Exporter';
-import { openMmlFile, saveMmlFile, downloadBlob } from './utils/fileSystem';
+import { openMmlFile, openMidiFile, saveMmlFile, downloadBlob } from './utils/fileSystem';
 import { PRESET_SONGS } from './constants/presets';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 
 export const App: React.FC = () => {
   // 初期コードはきらきら星プリセット
   const [mmlText, setMmlText] = useState<string>(PRESET_SONGS[0].mml);
   const [currentFilename, setCurrentFilename] = useState<string>('twinkle_star.mml');
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
+
+  // MIDIインポート状態
+  const [isMidiModalOpen, setIsMidiModalOpen] = useState(false);
+  const [importedMidiData, setImportedMidiData] = useState<ParsedMidiData | null>(null);
+  const [importedMidiFilename, setImportedMidiFilename] = useState<string>('');
 
   // エディタのテキストカーソル位置
   const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ lineNumber: 1, column: 1 });
@@ -189,6 +197,101 @@ export const App: React.FC = () => {
     }
   }, [handleStop]);
 
+  // MIDI ファイルを開く
+  const handleOpenMidi = useCallback(async () => {
+    try {
+      const { buffer, filename } = await openMidiFile();
+      const midiData = parseMidiFile(buffer);
+      setImportedMidiData(midiData);
+      setImportedMidiFilename(filename);
+      setIsMidiModalOpen(true);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('MIDI読み込みエラー:', err);
+        alert(`MIDIファイルの解析に失敗しました: ${err.message || err}`);
+      }
+    }
+  }, []);
+
+  // MIDI インポート確定
+  const handleConfirmMidiImport = useCallback(
+    (selectedTrackIds: number[], quantizeResolution: number) => {
+      if (!importedMidiData) return;
+      try {
+        handleStop();
+        setGlobalKeyShift(0);
+        const songTitle = importedMidiFilename.replace(/\.[^/.]+$/, '');
+        const generatedMml = convertMidiToMml(importedMidiData, {
+          selectedTrackIds,
+          quantizeResolution,
+          songTitle,
+        });
+
+        setMmlText(generatedMml);
+        const newMmlFilename = `${songTitle}.mml`;
+        setCurrentFilename(newMmlFilename);
+        setFileHandle(null);
+      } catch (err: any) {
+        console.error('MML変換エラー:', err);
+        alert(`MML変換に失敗しました: ${err.message || err}`);
+      }
+    },
+    [importedMidiData, importedMidiFilename, handleStop]
+  );
+
+  // ドラッグ＆ドロップ処理
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingOver(false);
+
+      const file = e.dataTransfer.files?.[0];
+      if (!file) return;
+
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith('.mid') || lowerName.endsWith('.midi')) {
+        try {
+          const buffer = await file.arrayBuffer();
+          const midiData = parseMidiFile(buffer);
+          setImportedMidiData(midiData);
+          setImportedMidiFilename(file.name);
+          setIsMidiModalOpen(true);
+        } catch (err: any) {
+          console.error('MIDI読み込みエラー:', err);
+          alert(`MIDIファイルの解析に失敗しました: ${err.message || err}`);
+        }
+      } else if (lowerName.endsWith('.mml') || lowerName.endsWith('.txt') || lowerName.endsWith('.sakura')) {
+        try {
+          const content = await file.text();
+          handleStop();
+          setGlobalKeyShift(0);
+          setMmlText(content);
+          setCurrentFilename(file.name);
+          setFileHandle(null);
+        } catch (err: any) {
+          console.error('MML読み込みエラー:', err);
+          alert(`ファイルの読み込みに失敗しました: ${err.message || err}`);
+        }
+      }
+    },
+    [handleStop]
+  );
+
   // 保存
   const handleSave = useCallback(async () => {
     try {
@@ -276,7 +379,12 @@ export const App: React.FC = () => {
   const isHorizontal = layoutOrientation === 'horizontal';
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+    <div
+      className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* ヘッダー */}
       <Header
         onOpenGuide={() => setIsGuideOpen(true)}
@@ -303,6 +411,7 @@ export const App: React.FC = () => {
         onSeek={handleSeek}
         onNew={handleNew}
         onOpen={handleOpen}
+        onImportMidi={handleOpenMidi}
         onSave={handleSave}
         onSaveAs={handleSaveAs}
         onExportMidi={handleExportMidi}
@@ -399,6 +508,32 @@ export const App: React.FC = () => {
         isOpen={isSoundFontModalOpen}
         onClose={() => setIsSoundFontModalOpen(false)}
       />
+
+      {/* MIDIインポート設定モーダル */}
+      <MidiImportModal
+        isOpen={isMidiModalOpen}
+        onClose={() => setIsMidiModalOpen(false)}
+        midiData={importedMidiData}
+        filename={importedMidiFilename}
+        onImport={handleConfirmMidiImport}
+      />
+
+      {/* ドラッグ＆ドロップ オーバーレイ表示 */}
+      {isDraggingOver && (
+        <div className="fixed inset-0 z-50 bg-blue-950/60 border-4 border-dashed border-blue-400 flex items-center justify-center pointer-events-none">
+          <div className="bg-white text-slate-900 px-8 py-6 rounded-2xl shadow-2xl flex items-center space-x-4 border border-blue-500 animate-in zoom-in-95 duration-150">
+            <div className="p-3 bg-blue-100 text-blue-700 rounded-xl">
+              <Upload className="w-8 h-8 animate-bounce" />
+            </div>
+            <div>
+              <div className="text-base font-bold text-slate-900">ファイルをドロップしてインポート</div>
+              <div className="text-xs text-slate-600 mt-0.5">
+                MIDI (.mid / .midi) または MML (.mml / .txt) に対応
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

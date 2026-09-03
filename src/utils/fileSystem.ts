@@ -59,6 +59,59 @@ export async function openMmlFile(): Promise<{ content: string; filename: string
 }
 
 /**
+ * ローカルの MIDI ファイル（.mid, .midi）を開いてバイナリ (ArrayBuffer) を取得する
+ */
+export async function openMidiFile(): Promise<{ buffer: ArrayBuffer; filename: string }> {
+  if ('showOpenFilePicker' in window) {
+    try {
+      const [handle] = await (window as any).showOpenFilePicker({
+        types: [
+          {
+            description: 'Standard MIDI File (*.mid, *.midi)',
+            accept: {
+              'audio/midi': ['.mid', '.midi'],
+            },
+          },
+        ],
+        multiple: false,
+      });
+
+      const file = await handle.getFile();
+      const buffer = await file.arrayBuffer();
+      return { buffer, filename: file.name };
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        throw err;
+      }
+      // フォールバックへ
+    }
+  }
+
+  // フォールバック: input[type=file]
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.mid,.midi,audio/midi';
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        reject(new Error('ファイルが選択されませんでした'));
+        return;
+      }
+      const buffer = await file.arrayBuffer();
+      resolve({ buffer, filename: file.name });
+    };
+
+    input.oncancel = () => {
+      reject(new DOMException('キャンセルされました', 'AbortError'));
+    };
+
+    input.click();
+  });
+}
+
+/**
  * ファイルを保存（上書きまたは新規保存）
  */
 export async function saveMmlFile(

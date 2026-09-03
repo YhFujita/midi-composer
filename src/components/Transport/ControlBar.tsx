@@ -14,6 +14,7 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Upload,
 } from 'lucide-react';
 import { ParsedScore } from '../../types/mml';
 import { PRESET_SONGS } from '../../constants/presets';
@@ -35,6 +36,7 @@ interface ControlBarProps {
   onSeek: (sec: number) => void;
   onNew: () => void;
   onOpen: () => void;
+  onImportMidi: () => void;
   onSave: () => void;
   onSaveAs: () => void;
   onExportMidi: () => void;
@@ -92,6 +94,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onSeek,
   onNew,
   onOpen,
+  onImportMidi,
   onSave,
   onSaveAs,
   onExportMidi,
@@ -125,6 +128,13 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             title="ローカルファイルを開く (.mml / .txt)"
           >
             <FolderOpen className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onImportMidi}
+            className="p-1.5 hover:bg-slate-800 rounded-md text-slate-300 hover:text-white transition-colors"
+            title="MIDIファイルをインポート (.mid / .midi)"
+          >
+            <Upload className="w-4 h-4 text-sky-400" />
           </button>
           <button
             onClick={onSave}
@@ -307,6 +317,16 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 
       {/* 右エリア: MIDI / MP3 エクスポート */}
       <div className="flex items-center space-x-2 w-full md:w-auto justify-end">
+        {/* MIDI 読込 (インポート) */}
+        <button
+          onClick={onImportMidi}
+          className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-md text-xs font-medium transition-colors cursor-pointer"
+          title="Standard MIDI File (.mid / .midi) をインポートしてMMLに変換"
+        >
+          <Upload className="w-3.5 h-3.5 text-sky-400" />
+          <span>MIDI 読込</span>
+        </button>
+
         {/* MIDI 保存 */}
         <button
           onClick={onExportMidi}
