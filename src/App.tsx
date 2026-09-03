@@ -4,6 +4,7 @@ import { ControlBar } from './components/Transport/ControlBar';
 import { MmlEditor, CursorPosition } from './components/Editor/MmlEditor';
 import { SheetMusic } from './components/Score/SheetMusic';
 import { MmlGuideModal } from './components/Editor/MmlGuideModal';
+import { SoundFontModal } from './components/SoundFont/SoundFontModal';
 import { parseMML, findBeatAtCursor } from './core/parser/mmlParser';
 import { generateMidiBlob } from './core/midi/midiGenerator';
 import { audioEngine } from './core/audio/soundFontPlayer';
@@ -45,6 +46,8 @@ export const App: React.FC = () => {
 
   // ガイドモーダル
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  // SoundFont設定モーダル
+  const [isSoundFontModalOpen, setIsSoundFontModalOpen] = useState(false);
 
   // 全体移調 (半音単位, 例: -1 で短2度下げ)
   const [globalKeyShift, setGlobalKeyShift] = useState<number>(0);
@@ -269,6 +272,7 @@ export const App: React.FC = () => {
       {/* ヘッダー */}
       <Header
         onOpenGuide={() => setIsGuideOpen(true)}
+        onOpenSoundFontModal={() => setIsSoundFontModalOpen(true)}
         layoutOrientation={layoutOrientation}
         onChangeLayout={handleLayoutChange}
       />
@@ -366,6 +370,12 @@ export const App: React.FC = () => {
       <MmlGuideModal
         isOpen={isGuideOpen}
         onClose={() => setIsGuideOpen(false)}
+      />
+
+      {/* SoundFont (MIDI音源) 設定モーダル */}
+      <SoundFontModal
+        isOpen={isSoundFontModalOpen}
+        onClose={() => setIsSoundFontModalOpen(false)}
       />
     </div>
   );

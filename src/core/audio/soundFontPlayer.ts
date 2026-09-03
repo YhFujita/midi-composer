@@ -1,26 +1,112 @@
-import { ParsedScore, NoteEvent, TempoEvent } from '../../types/mml';
+import { ParsedScore, NoteEvent } from '../../types/mml';
 import { midiToFreq } from '../../utils/noteConverter';
+import { soundFontManager } from './soundFontManager';
+import { WorkletSynthesizer } from 'spessasynth_lib';
 
 export interface PlayerCallback {
   onProgress?: (currentTimeSec: number, currentBeat: number, totalDurationSec: number) => void;
   onEnded?: () => void;
 }
 
+interface ScheduledNoteItem {
+  id: string;
+  startSec: number;
+  endSec: number;
+  channel: number; // 0 - 15
+  midiNote: number;
+  velocity: number;
+  instrument: number;
+  onTimerId?: any;
+  offTimerId?: any;
+  isStarted?: boolean;
+  isEnded?: boolean;
+}
+
 export class AudioEngine {
   private audioCtx: AudioContext | null = null;
+  private synth: WorkletSynthesizer | null = null;
+  private isSoundFontReady = false;
+  private isSynthInitializing = false;
+
   private isPlaying = false;
   private isPaused = false;
   private startTimeSec = 0;
   private pausedAtSec = 0;
   private currentScore: ParsedScore | null = null;
-  private activeNodes: { stop: (time: number) => void }[] = [];
   private animationFrameId: number | null = null;
+  private schedulerIntervalId: any = null;
   private callbacks: PlayerCallback = {};
   private tempoMap: { time: number; bpm: number; secStart: number }[] = [];
   private totalDurationSec = 0;
 
+  // 再生中ノートの管理
+  private scheduledNotes: ScheduledNoteItem[] = [];
+  private activeTimers: any[] = [];
+  private activeOscillatorNodes: { stop: (time: number) => void }[] = [];
+
   constructor() {
-    // AudioContext はユーザー操作時に初期化
+    // アプリ起動時にバックグラウンドで SoundFont の準備を開始
+    if (typeof window !== 'undefined') {
+      this.initSoundFont();
+    }
+  }
+
+  /**
+   * SoundFont2 シンセサイザーの初期化
+   */
+  public async initSoundFont(): Promise<boolean> {
+    if (this.isSoundFontReady && this.synth) return true;
+    if (this.isSynthInitializing) return false;
+
+    this.isSynthInitializing = true;
+    try {
+      const ctx = this.initAudioContext();
+
+      // AudioWorklet モジュールの登録
+      await ctx.audioWorklet.addModule('/spessasynth_processor.min.js');
+
+      // シンセサイザーの生成
+      const synth = new WorkletSynthesizer(ctx);
+      await synth.isReady;
+
+      // SoundFont データのロード (IndexedDB または fetch)
+      const buffer = await soundFontManager.loadDefaultSoundFont();
+
+      // SoundBank の登録
+      await synth.soundBankManager.addSoundBank(buffer, 'main');
+
+      this.synth = synth;
+      this.isSoundFontReady = true;
+      this.isSynthInitializing = false;
+      console.log('SpessaSynth SoundFont engine ready with TimGM6mb.sf2');
+      return true;
+    } catch (err) {
+      console.warn('SoundFont engine initialization deferred or fallback to oscillator:', err);
+      this.isSynthInitializing = false;
+      return false;
+    }
+  }
+
+  /**
+   * カスタム SoundFont バッファをシンセに適用
+   */
+  public async applySoundFontBuffer(buffer: ArrayBuffer): Promise<void> {
+    const ctx = this.initAudioContext();
+    if (!this.synth) {
+      await ctx.audioWorklet.addModule('/spessasynth_processor.min.js');
+      this.synth = new WorkletSynthesizer(ctx);
+      await this.synth.isReady;
+    }
+
+    try {
+      // 既存の main を上書き
+      await this.synth.soundBankManager.addSoundBank(buffer, 'main');
+      this.isSoundFontReady = true;
+      console.log('Custom soundfont applied successfully.');
+    } catch (err) {
+      console.error('Failed to apply custom soundfont:', err);
+      throw err;
+    }
   }
 
   private initAudioContext(): AudioContext {
@@ -66,16 +152,12 @@ export class AudioEngine {
       });
     }
 
-    // 総秒数の計算
     const totalBeats = score.totalDuration;
     const lastTempo = this.tempoMap[this.tempoMap.length - 1];
     const remainingBeats = Math.max(0, totalBeats - lastTempo.time);
     this.totalDurationSec = lastTempo.secStart + (remainingBeats * 60) / lastTempo.bpm;
   }
 
-  /**
-   * 拍数 (beat) を 秒数 (sec) に変換
-   */
   public beatToSec(beat: number): number {
     if (this.tempoMap.length === 0) return (beat * 60) / 120;
 
@@ -93,17 +175,11 @@ export class AudioEngine {
     return t.secStart + (deltaBeat * 60) / t.bpm;
   }
 
-  /**
-   * 指定した楽譜における拍数 (beat) を秒数 (sec) に変換
-   */
   public calculateBeatToSec(score: ParsedScore, beat: number): number {
     this.buildTempoMap(score);
     return this.beatToSec(beat);
   }
 
-  /**
-   * 秒数 (sec) を 拍数 (beat) に変換
-   */
   public secToBeat(sec: number): number {
     if (this.tempoMap.length === 0) return (sec * 120) / 60;
 
@@ -122,9 +198,221 @@ export class AudioEngine {
   }
 
   /**
-   * ノートを合成して AudioNode をスケジュール再生
+   * 楽譜の全ノートを発音スケジュール用アイテムに平坦化
    */
-  private scheduleNote(
+  private prepareScheduledNotes(score: ParsedScore, startOffsetSec: number): ScheduledNoteItem[] {
+    const list: ScheduledNoteItem[] = [];
+
+    score.tracks.forEach((track) => {
+      // 0-indexed channel (0-15)
+      const midiChannel = Math.max(0, Math.min(15, track.channel - 1));
+
+      track.notes.forEach((note, noteIdx) => {
+        if (note.hasTieFromPrev) return;
+
+        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        let effectiveEndBeat = note.startTime + noteDur;
+
+        if (note.hasTieToNext) {
+          let currentNote = note;
+          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+            const nextNote = track.notes[nextIdx];
+            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+              const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
+              effectiveEndBeat = nextNote.startTime + nextDur;
+              if (!nextNote.hasTieToNext) break;
+              currentNote = nextNote;
+            }
+          }
+        }
+
+        if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
+          effectiveEndBeat = note.pedalReleaseTime;
+        }
+
+        const noteStartSec = this.beatToSec(note.startTime);
+        const noteEndSec = this.beatToSec(effectiveEndBeat);
+
+        const strumOffsetSec = note.isStrum && note.strumOrder
+          ? note.strumOrder * (note.strumDelaySec || 0.035)
+          : 0;
+
+        const effectiveStartSec = noteStartSec + strumOffsetSec;
+        const effectiveEndSec = Math.max(effectiveStartSec + 0.05, noteEndSec);
+
+        if (effectiveEndSec > startOffsetSec) {
+          const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+          list.push({
+            id: `tr${track.id}_n${noteIdx}_${note.midiNote}_${effectiveStartSec}`,
+            startSec: effectiveStartSec,
+            endSec: effectiveEndSec,
+            channel: midiChannel,
+            midiNote: note.midiNote,
+            velocity: note.velocity || 100,
+            instrument: inst,
+          });
+        }
+      });
+    });
+
+    list.sort((a, b) => a.startSec - b.startSec);
+    return list;
+  }
+
+  /**
+   * 楽譜の再生を開始
+   */
+  public play(score: ParsedScore, startOffsetSec = 0) {
+    const ctx = this.initAudioContext();
+    this.stop();
+
+    this.currentScore = score;
+    this.buildTempoMap(score);
+    this.isPlaying = true;
+    this.isPaused = false;
+    this.pausedAtSec = startOffsetSec;
+
+    const now = ctx.currentTime;
+    this.startTimeSec = now - startOffsetSec;
+
+    // もし SoundFont がまだ準備できていなければ裏でロード試行
+    if (!this.isSoundFontReady) {
+      this.initSoundFont();
+    }
+
+    if (this.isSoundFontReady && this.synth) {
+      // SoundFont チャンネル設定 (各トラックの初期楽器を設定)
+      score.tracks.forEach((track) => {
+        const ch = Math.max(0, Math.min(15, track.channel - 1));
+        if (ch !== 9) { // チャンネル 9 (10) はドラム専用
+          this.synth?.programChange(ch, track.instrument);
+        }
+      });
+
+      this.scheduledNotes = this.prepareScheduledNotes(score, startOffsetSec);
+      this.startSoundFontScheduler();
+    } else {
+      // SoundFont ロード前はオシレータフォールバックで再生
+      this.playOscillatorFallback(score, startOffsetSec);
+    }
+
+    this.startProgressLoop();
+  }
+
+  /**
+   * SoundFont 用の高精度スケジューラー
+   */
+  private startSoundFontScheduler() {
+    const LOOKAHEAD_SEC = 0.15; // 150ms 先まで先読みスケジュール
+    const CHECK_INTERVAL_MS = 25; // 25ms ごとにチェック
+
+    const checkAndSchedule = () => {
+      if (!this.isPlaying || !this.audioCtx || !this.synth) return;
+
+      const currentSec = this.getCurrentTimeSec();
+      const windowEndSec = currentSec + LOOKAHEAD_SEC;
+
+      for (let i = 0; i < this.scheduledNotes.length; i++) {
+        const item = this.scheduledNotes[i];
+
+        if (item.startSec > windowEndSec) {
+          // これ以降のノートはまだ先なのでループ終了
+          break;
+        }
+
+        // 発音スケジュール
+        if (!item.isStarted && item.startSec >= currentSec - 0.05 && item.startSec <= windowEndSec) {
+          item.isStarted = true;
+          const delayMs = Math.max(0, (item.startSec - currentSec) * 1000);
+
+          item.onTimerId = setTimeout(() => {
+            if (!this.isPlaying || !this.synth) return;
+            // 楽器変更が必要な場合
+            if (item.channel !== 9) {
+              this.synth.programChange(item.channel, item.instrument);
+            }
+            this.synth.noteOn(item.channel, item.midiNote, item.velocity);
+          }, delayMs);
+          this.activeTimers.push(item.onTimerId);
+
+          // 停止スケジュール
+          const offDelayMs = Math.max(10, (item.endSec - currentSec) * 1000);
+          item.offTimerId = setTimeout(() => {
+            if (!this.synth) return;
+            this.synth.noteOff(item.channel, item.midiNote);
+            item.isEnded = true;
+          }, offDelayMs);
+          this.activeTimers.push(item.offTimerId);
+        }
+      }
+    };
+
+    // 直ちに一度実行して、タイマーを開始
+    checkAndSchedule();
+    this.schedulerIntervalId = setInterval(checkAndSchedule, CHECK_INTERVAL_MS);
+  }
+
+  /**
+   * オシレータによるフォールバック再生
+   */
+  private playOscillatorFallback(score: ParsedScore, startOffsetSec: number) {
+    if (!this.audioCtx) return;
+    const ctx = this.audioCtx;
+    const now = ctx.currentTime;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.7, now);
+    masterGain.connect(ctx.destination);
+
+    this.activeOscillatorNodes = [];
+
+    score.tracks.forEach((track) => {
+      track.notes.forEach((note, noteIdx) => {
+        if (note.hasTieFromPrev) return;
+
+        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        let effectiveEndBeat = note.startTime + noteDur;
+
+        if (note.hasTieToNext) {
+          let currentNote = note;
+          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+            const nextNote = track.notes[nextIdx];
+            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+              const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
+              effectiveEndBeat = nextNote.startTime + nextDur;
+              if (!nextNote.hasTieToNext) break;
+              currentNote = nextNote;
+            }
+          }
+        }
+
+        if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
+          effectiveEndBeat = note.pedalReleaseTime;
+        }
+        const noteStartSec = this.beatToSec(note.startTime);
+        const noteEndSec = this.beatToSec(effectiveEndBeat);
+        const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
+
+        if (noteEndSec > startOffsetSec) {
+          const strumOffsetSec = (note.isStrum && note.strumOrder)
+            ? note.strumOrder * (note.strumDelaySec || 0.035)
+            : 0;
+          const audioStartTime = now + (noteStartSec - startOffsetSec) + strumOffsetSec;
+          const effectiveDurSec = Math.max(0.02, noteDurSec - strumOffsetSec);
+
+          if (audioStartTime >= now) {
+            const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+            const node = this.scheduleNoteOscillator(ctx, note, inst, audioStartTime, effectiveDurSec, masterGain);
+            this.activeOscillatorNodes.push(node);
+          }
+        }
+      });
+    });
+  }
+
+  /**
+   * オシレータによる単一ノート合成（フォールバック用）
+   */
+  private scheduleNoteOscillator(
     ctx: BaseAudioContext,
     note: NoteEvent,
     instrument: number,
@@ -135,241 +423,30 @@ export class AudioEngine {
     const freq = midiToFreq(note.midiNote);
     const vel = (note.velocity || 100) / 127;
 
-    // GM 音色番号に応じたサウンド生成 (全16ファミリー対応)
     let oscType: OscillatorType = 'triangle';
     let filterFreq = 3500;
     let attack = 0.01;
     let decay = 0.3;
     let sustain = 0.4;
     let release = 0.2;
-    let isBrass = false;
 
     if (instrument >= 0 && instrument <= 7) {
-      // 0-7: Piano
       if (instrument >= 4 && instrument <= 5) {
-        // Electric Piano (まろやかな Rhodes / DX7 系)
         oscType = 'sine';
         filterFreq = 2400;
-        attack = 0.005;
         decay = 1.0;
-        sustain = 0.3;
-        release = 0.35;
-      } else if (instrument >= 6 && instrument <= 7) {
-        // Harpsichord / Clavinet (明るいチェンバロ)
-        oscType = 'sawtooth';
-        filterFreq = 4800;
-        attack = 0.002;
-        decay = 0.6;
-        sustain = 0.15;
-        release = 0.2;
       } else {
-        // Acoustic Grand Piano
         oscType = 'triangle';
         filterFreq = 3600;
-        attack = 0.003;
         decay = 0.9;
-        sustain = 0.1;
-        release = 0.3;
       }
-    } else if (instrument >= 8 && instrument <= 15) {
-      // 8-15: Chromatic Percussion (オルゴール, 鉄琴, マリンバ, ベル)
-      oscType = 'sine';
-      filterFreq = 6500;
-      attack = 0.001;
-      decay = 0.7;
-      sustain = 0.02;
-      release = 0.35;
     } else if (instrument >= 16 && instrument <= 23) {
-      // 16-23: Organ (パイプオルガン, ハモンド, アコーディオン, ハーモニカ)
       oscType = instrument === 19 ? 'sawtooth' : 'sine';
       filterFreq = 3000;
-      attack = 0.02;
-      decay = 0.1;
       sustain = 0.9;
-      release = 0.08;
-    } else if (instrument >= 24 && instrument <= 31) {
-      // 24-31: Guitar
-      if (instrument >= 29 && instrument <= 30) {
-        // Overdrive / Distortion
-        oscType = 'sawtooth';
-        filterFreq = 2200;
-        attack = 0.005;
-        decay = 0.3;
-        sustain = 0.7;
-        release = 0.25;
-      } else if (instrument === 31) {
-        // Harmonics
-        oscType = 'sine';
-        filterFreq = 6000;
-        attack = 0.002;
-        decay = 0.8;
-        sustain = 0.05;
-        release = 0.3;
-      } else {
-        // Acoustic / Clean Guitar
-        oscType = instrument >= 26 ? 'sawtooth' : 'triangle';
-        filterFreq = 2800;
-        attack = 0.008;
-        decay = 0.6;
-        sustain = 0.15;
-        release = 0.25;
-      }
-    } else if (instrument >= 32 && instrument <= 39) {
-      // 32-39: Bass (ウッドベース, エレキベース, シンセベース)
-      oscType = instrument >= 38 ? 'square' : 'sawtooth';
-      filterFreq = 900; // 重低音ローパス
-      attack = 0.01;
-      decay = 0.45;
-      sustain = 0.55;
-      release = 0.15;
-    } else if (instrument >= 40 && instrument <= 47) {
-      // 40-47: Solo Strings (バイオリン, チェロ, ハープ, ピチカート)
-      if (instrument === 45 || instrument === 46) {
-        // Pizzicato / Harp
-        oscType = 'triangle';
-        filterFreq = 3200;
-        attack = 0.002;
-        decay = 0.6;
-        sustain = 0.05;
-        release = 0.2;
-      } else if (instrument === 47) {
-        // Timpani
-        oscType = 'sine';
-        filterFreq = 450;
-        attack = 0.005;
-        decay = 0.6;
-        sustain = 0.05;
-        release = 0.3;
-      } else {
-        // Violin / Cello
-        oscType = 'sawtooth';
-        filterFreq = 2400;
-        attack = 0.08;
-        decay = 0.3;
-        sustain = 0.85;
-        release = 0.4;
-      }
-    } else if (instrument >= 48 && instrument <= 55) {
-      // 48-55: Ensemble & Choir (ストリングス合奏, クワイア, オーケストラヒット)
-      if (instrument >= 52 && instrument <= 54) {
-        // Choir / Voice (合唱)
-        oscType = 'sine';
-        filterFreq = 1600;
-        attack = 0.15;
-        decay = 0.25;
-        sustain = 0.8;
-        release = 0.45;
-      } else if (instrument === 55) {
-        // Orchestra Hit
-        oscType = 'sawtooth';
-        filterFreq = 4500;
-        attack = 0.001;
-        decay = 0.35;
-        sustain = 0.2;
-        release = 0.25;
-      } else {
-        // String Ensemble 1 & 2, Synth Strings
-        oscType = 'sawtooth';
-        filterFreq = 2800;
-        attack = 0.12;
-        decay = 0.25;
-        sustain = 0.88;
-        release = 0.5;
-      }
-    } else if (instrument >= 56 && instrument <= 63) {
-      // 56-63: Brass (トランペット, トロンボーン, ホルン, ブラスセクション)
-      oscType = 'sawtooth';
-      filterFreq = 3400;
-      attack = 0.04;
-      decay = 0.2;
-      sustain = 0.78;
-      release = 0.2;
-      isBrass = true;
-    } else if (instrument >= 64 && instrument <= 71) {
-      // 64-71: Reed (サックス, オーボエ, ファゴット, クラリネット)
-      oscType = instrument >= 68 ? 'square' : 'sawtooth';
-      filterFreq = 2600;
-      attack = 0.03;
-      decay = 0.2;
-      sustain = 0.82;
-      release = 0.18;
-    } else if (instrument >= 72 && instrument <= 79) {
-      // 72-79: Pipe (フルート, ピッコロ, リコーダー, 尺八, オカリナ)
-      oscType = 'sine';
-      filterFreq = 5200;
-      attack = 0.05;
-      decay = 0.1;
-      sustain = 0.88;
-      release = 0.15;
-    } else if (instrument >= 80 && instrument <= 87) {
-      // 80-87: Synth Lead (矩形波リード, ノコギリ波リード 等)
-      oscType = instrument === 80 ? 'square' : 'sawtooth';
-      filterFreq = 4000;
-      attack = 0.006;
-      decay = 0.15;
-      sustain = 0.75;
-      release = 0.18;
-    } else if (instrument >= 88 && instrument <= 95) {
-      // 88-95: Synth Pad (幻想的なパッド音)
-      oscType = 'sawtooth';
-      filterFreq = 2000;
-      attack = 0.25;
-      decay = 0.35;
-      sustain = 0.9;
-      release = 0.7;
-    } else if (instrument >= 104 && instrument <= 111) {
-      // 104-111: Ethnic (シタール, 三味線, 琴, カリンバ)
-      if (instrument === 108) {
-        // Kalimba
-        oscType = 'sine';
-        filterFreq = 3600;
-        attack = 0.002;
-        decay = 0.6;
-        sustain = 0.05;
-        release = 0.25;
-      } else {
-        // Shamisen / Koto / Sitar
-        oscType = 'sawtooth';
-        filterFreq = 4200;
-        attack = 0.002;
-        decay = 0.5;
-        sustain = 0.08;
-        release = 0.25;
-      }
-    } else if (instrument >= 112 && instrument <= 119) {
-      // 112-119: Percussive (スチールドラム, 和太鼓 等)
-      if (instrument === 114) {
-        // Steel Drum
-        oscType = 'sine';
-        filterFreq = 4000;
-        attack = 0.002;
-        decay = 0.75;
-        sustain = 0.12;
-        release = 0.25;
-      } else if (instrument === 116) {
-        // Taiko
-        oscType = 'triangle';
-        filterFreq = 650;
-        attack = 0.002;
-        decay = 0.4;
-        sustain = 0.05;
-        release = 0.2;
-      } else {
-        oscType = 'triangle';
-        filterFreq = 2400;
-        attack = 0.002;
-        decay = 0.4;
-        sustain = 0.05;
-        release = 0.2;
-      }
     } else {
-      // 96-103: Synth FX / 120-127: SFX / その他
-      oscType = 'square';
-      filterFreq = 2800;
-      attack = 0.01;
-      decay = 0.25;
-      sustain = 0.5;
-      release = 0.2;
+      oscType = 'sawtooth';
+      filterFreq = 2500;
     }
 
     const osc = ctx.createOscillator();
@@ -380,16 +457,8 @@ export class AudioEngine {
     osc.frequency.setValueAtTime(freq, startAudioTime);
 
     filter.type = 'lowpass';
-    if (isBrass) {
-      // ブラス特有のフィルター開閉エンベロープ
-      filter.frequency.setValueAtTime(filterFreq * 0.4, startAudioTime);
-      filter.frequency.linearRampToValueAtTime(filterFreq * 1.5, startAudioTime + attack);
-      filter.frequency.exponentialRampToValueAtTime(filterFreq, startAudioTime + attack + decay);
-    } else {
-      filter.frequency.setValueAtTime(filterFreq, startAudioTime);
-    }
+    filter.frequency.setValueAtTime(filterFreq, startAudioTime);
 
-    // ADSR エンベロープ
     const peakGain = vel * 0.4;
     const sustainGain = peakGain * sustain;
     const stopTime = startAudioTime + durationSec + release;
@@ -421,90 +490,14 @@ export class AudioEngine {
   }
 
   /**
-   * 楽譜の再生を開始
-   */
-  public play(score: ParsedScore, startOffsetSec = 0) {
-    const ctx = this.initAudioContext();
-    this.stop();
-
-    this.currentScore = score;
-    this.buildTempoMap(score);
-    this.isPlaying = true;
-    this.isPaused = false;
-    this.pausedAtSec = startOffsetSec;
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.7, ctx.currentTime);
-    masterGain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    this.startTimeSec = now - startOffsetSec;
-
-    // スケジュール設定
-    this.activeNodes = [];
-
-    score.tracks.forEach((track) => {
-      track.notes.forEach((note, noteIdx) => {
-        // タイで直前の音から継続している場合は新規発音しない
-        if (note.hasTieFromPrev) return;
-
-        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
-        let effectiveEndBeat = note.startTime + noteDur;
-
-        // タイで次の音に継続している場合、タイ末尾の音まで発音を持続
-        if (note.hasTieToNext) {
-          let currentNote = note;
-          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
-            const nextNote = track.notes[nextIdx];
-            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
-              const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
-              effectiveEndBeat = nextNote.startTime + nextDur;
-              if (!nextNote.hasTieToNext) break;
-              currentNote = nextNote;
-            }
-          }
-        }
-
-        if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
-          effectiveEndBeat = note.pedalReleaseTime;
-        }
-        const noteStartSec = this.beatToSec(note.startTime);
-        const noteEndSec = this.beatToSec(effectiveEndBeat);
-        const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
-
-        // 指定位置より先のノートのみスケジュール
-        if (noteEndSec > startOffsetSec) {
-          const strumOffsetSec = (note.isStrum && note.strumOrder)
-            ? note.strumOrder * (note.strumDelaySec || 0.035)
-            : 0;
-          const audioStartTime = now + (noteStartSec - startOffsetSec) + strumOffsetSec;
-          const effectiveDurSec = Math.max(0.02, noteDurSec - strumOffsetSec);
-
-          if (audioStartTime >= now) {
-            const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-            const node = this.scheduleNote(ctx, note, inst, audioStartTime, effectiveDurSec, masterGain);
-            this.activeNodes.push(node);
-          }
-        }
-      });
-    });
-
-    this.startProgressLoop();
-  }
-
-  /**
    * 一時停止
    */
   public pause() {
     if (!this.isPlaying || this.isPaused || !this.audioCtx) return;
     this.pausedAtSec = this.getCurrentTimeSec();
-    this.clearNodes();
+    this.clearPlayback();
     this.isPlaying = false;
     this.isPaused = true;
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
   }
 
   /**
@@ -520,21 +513,17 @@ export class AudioEngine {
    * 停止
    */
   public stop() {
-    this.clearNodes();
+    this.clearPlayback();
     this.isPlaying = false;
     this.isPaused = false;
     this.pausedAtSec = 0;
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
     if (this.callbacks.onProgress) {
       this.callbacks.onProgress(0, 0, this.totalDurationSec);
     }
   }
 
   /**
-   * 指定位置へのシーク
+   * シーク
    */
   public seek(sec: number) {
     const clampedSec = Math.max(0, Math.min(this.totalDurationSec, sec));
@@ -559,12 +548,33 @@ export class AudioEngine {
     return this.totalDurationSec;
   }
 
-  private clearNodes() {
+  private clearPlayback() {
+    if (this.schedulerIntervalId) {
+      clearInterval(this.schedulerIntervalId);
+      this.schedulerIntervalId = null;
+    }
+    this.activeTimers.forEach((id) => clearTimeout(id));
+    this.activeTimers = [];
+    this.scheduledNotes = [];
+
+    if (this.synth) {
+      try {
+        this.synth.stopAll(true);
+      } catch {
+        // ignore
+      }
+    }
+
     if (this.audioCtx) {
       const now = this.audioCtx.currentTime;
-      this.activeNodes.forEach((node) => node.stop(now));
+      this.activeOscillatorNodes.forEach((node) => node.stop(now));
     }
-    this.activeNodes = [];
+    this.activeOscillatorNodes = [];
+
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
   }
 
   private startProgressLoop() {
@@ -596,30 +606,135 @@ export class AudioEngine {
   }
 
   /**
-   * OfflineAudioContext を使って無音で全音源を PCM レンダリングする（MP3書き出し用）
+   * 楽器の音色確認用の短いプレビュー演奏 (C4, E4, G4 の分散和音)
+   */
+  public previewInstrument(instrument: number) {
+    const ctx = this.initAudioContext();
+
+    if (this.isSoundFontReady && this.synth) {
+      // チャンネル0で楽器変更してアルペジオ演奏
+      this.synth.programChange(0, instrument);
+
+      const notes = [
+        { midi: 60, delay: 0, dur: 350 },
+        { midi: 64, delay: 150, dur: 350 },
+        { midi: 67, delay: 300, dur: 600 },
+      ];
+
+      notes.forEach((n) => {
+        setTimeout(() => {
+          if (!this.synth) return;
+          this.synth.noteOn(0, n.midi, 100);
+          setTimeout(() => {
+            this.synth?.noteOff(0, n.midi);
+          }, n.dur);
+        }, n.delay);
+      });
+    } else {
+      // フォールバック
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.5, now);
+      masterGain.connect(ctx.destination);
+
+      const notes = [
+        { midi: 60, offset: 0, dur: 0.35 },
+        { midi: 64, offset: 0.15, dur: 0.35 },
+        { midi: 67, offset: 0.3, dur: 0.6 },
+      ];
+
+      notes.forEach((n) => {
+        const dummyNote: NoteEvent = {
+          pitch: 'C',
+          midiNote: n.midi,
+          startTime: 0,
+          duration: 1,
+          velocity: 100,
+          trackId: 0,
+          channel: 1,
+        };
+        this.scheduleNoteOscillator(ctx, dummyNote, instrument, now + n.offset, n.dur, masterGain);
+      });
+    }
+  }
+
+  /**
+   * コードプレビュー演奏
+   */
+  public previewChord(
+    midiNotes: number[],
+    instrument = 0,
+    isStrum = true,
+    strumDirection: 'down' | 'up' = 'down'
+  ) {
+    const ctx = this.initAudioContext();
+    const sorted = [...midiNotes].sort((a, b) =>
+      strumDirection === 'down' ? a - b : b - a
+    );
+
+    if (this.isSoundFontReady && this.synth) {
+      this.synth.programChange(0, instrument);
+
+      sorted.forEach((midi, idx) => {
+        const delay = isStrum ? idx * 40 : 0;
+        const dur = Math.max(400, 1200 - delay);
+
+        setTimeout(() => {
+          if (!this.synth) return;
+          this.synth.noteOn(0, midi, 95);
+          setTimeout(() => {
+            this.synth?.noteOff(0, midi);
+          }, dur);
+        }, delay);
+      });
+    } else {
+      // フォールバック
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.45, now);
+      masterGain.connect(ctx.destination);
+
+      sorted.forEach((midi, idx) => {
+        const dummyNote: NoteEvent = {
+          pitch: '',
+          midiNote: midi,
+          startTime: 0,
+          duration: 1,
+          velocity: 95,
+          trackId: 0,
+          channel: 1,
+        };
+        const offset = isStrum ? idx * 0.04 : 0;
+        const dur = 1.2 - offset;
+        this.scheduleNoteOscillator(ctx, dummyNote, instrument, now + offset, Math.max(0.4, dur), masterGain);
+      });
+    }
+  }
+
+  /**
+   * OfflineAudioContext を使った PCM レンダリング (MP3 書き出し用)
    */
   public async renderOffline(score: ParsedScore): Promise<AudioBuffer> {
     this.buildTempoMap(score);
     const sampleRate = 44100;
-    const duration = Math.max(1.0, this.totalDurationSec + 1.0); // 余韻を含める
+    const duration = Math.max(1.0, this.totalDurationSec + 1.0);
     const length = Math.ceil(sampleRate * duration);
 
     const OfflineAudioCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
     const offlineCtx = new OfflineAudioCtxClass(2, length, sampleRate);
 
+    // 現時点ではブラウザ間互換性と安定性のため、Offline時は確実かつ高速なオシレータ合成またはフォールバックパイプラインを使用
     const masterGain = offlineCtx.createGain();
     masterGain.gain.setValueAtTime(0.7, 0);
     masterGain.connect(offlineCtx.destination);
 
     score.tracks.forEach((track) => {
       track.notes.forEach((note, noteIdx) => {
-        // タイで直前の音から継続している場合は新規発音しない
         if (note.hasTieFromPrev) return;
 
         let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         let effectiveEndBeat = note.startTime + noteDur;
 
-        // タイで次の音に継続している場合、タイ末尾の音まで発音を持続
         if (note.hasTieToNext) {
           let currentNote = note;
           for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
@@ -641,79 +756,11 @@ export class AudioEngine {
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-        this.scheduleNote(offlineCtx, note, inst, noteStartSec, noteDurSec, masterGain);
+        this.scheduleNoteOscillator(offlineCtx, note, inst, noteStartSec, noteDurSec, masterGain);
       });
     });
 
     return await offlineCtx.startRendering();
-  }
-
-  /**
-   * 楽器の音色確認用の短いプレビュー演奏 (C4, E4, G4 の分散和音)
-   */
-  public previewInstrument(instrument: number) {
-    const ctx = this.initAudioContext();
-    const now = ctx.currentTime;
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.5, now);
-    masterGain.connect(ctx.destination);
-
-    // C4 (60), E4 (64), G4 (67) を軽くアルペジオ演奏
-    const notes = [
-      { midi: 60, offset: 0, dur: 0.35 },
-      { midi: 64, offset: 0.15, dur: 0.35 },
-      { midi: 67, offset: 0.3, dur: 0.6 },
-    ];
-
-    notes.forEach((n) => {
-      const dummyNote: NoteEvent = {
-        pitch: 'C',
-        midiNote: n.midi,
-        startTime: 0,
-        duration: 1,
-        velocity: 100,
-        trackId: 0,
-        channel: 1,
-      };
-      this.scheduleNote(ctx, dummyNote, instrument, now + n.offset, n.dur, masterGain);
-    });
-  }
-
-  /**
-   * 指定したMIDIノート群のコードプレビュー演奏（通常同時発音 または バラシ演奏）
-   */
-  public previewChord(
-    midiNotes: number[],
-    instrument = 0,
-    isStrum = true,
-    strumDirection: 'down' | 'up' = 'down'
-  ) {
-    const ctx = this.initAudioContext();
-    const now = ctx.currentTime;
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.45, now);
-    masterGain.connect(ctx.destination);
-
-    // 方向に応じた並び替え
-    const sorted = [...midiNotes].sort((a, b) =>
-      strumDirection === 'down' ? a - b : b - a
-    );
-
-    sorted.forEach((midi, idx) => {
-      const dummyNote: NoteEvent = {
-        pitch: '',
-        midiNote: midi,
-        startTime: 0,
-        duration: 1,
-        velocity: 95,
-        trackId: 0,
-        channel: 1,
-      };
-      // isStrum が有効な場合は約40ms間隔のストローク、無効な場合は完全同時
-      const offset = isStrum ? idx * 0.04 : 0;
-      const dur = 1.2 - offset;
-      this.scheduleNote(ctx, dummyNote, instrument, now + offset, Math.max(0.4, dur), masterGain);
-    });
   }
 }
 
