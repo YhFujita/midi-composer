@@ -43,6 +43,7 @@ export class AudioEngine {
   private scheduledNotes: ScheduledNoteItem[] = [];
   private activeTimers: any[] = [];
   private activeOscillatorNodes: { stop: (time: number) => void }[] = [];
+  private activeSingleOscillators = new Map<number, { osc: OscillatorNode; gain: GainNode; stopTimer?: any }>();
 
   constructor() {
     // アプリ起動時にバックグラウンドで SoundFont の準備を開始
@@ -568,6 +569,16 @@ export class AudioEngine {
     if (this.audioCtx) {
       const now = this.audioCtx.currentTime;
       this.activeOscillatorNodes.forEach((node) => node.stop(now));
+      this.activeSingleOscillators.forEach((item) => {
+        try {
+          item.osc.stop(now);
+          item.osc.disconnect();
+          item.gain.disconnect();
+        } catch {
+          // ignore
+        }
+      });
+      this.activeSingleOscillators.clear();
     }
     this.activeOscillatorNodes = [];
 
@@ -709,6 +720,103 @@ export class AudioEngine {
         this.scheduleNoteOscillator(ctx, dummyNote, instrument, now + offset, Math.max(0.4, dur), masterGain);
       });
     }
+  }
+
+  /**
+   * ピアノ鍵盤演奏用: 単音のノートオン
+   */
+  public noteOn(midiNote: number, velocity = 100, instrument = 0) {
+    const ctx = this.initAudioContext();
+
+    if (this.isSoundFontReady && this.synth) {
+      this.synth.programChange(0, instrument);
+      this.synth.noteOn(0, midiNote, Math.max(1, Math.min(127, velocity)));
+    } else {
+      // フォールバック: Web Audio オシレータ
+      const now = ctx.currentTime;
+      // 既存の同音があれば停止
+      const existing = this.activeSingleOscillators.get(midiNote);
+      if (existing) {
+        try {
+          existing.osc.stop(now);
+          existing.osc.disconnect();
+          existing.gain.disconnect();
+        } catch {
+          // ignore
+        }
+        this.activeSingleOscillators.delete(midiNote);
+      }
+
+      const freq = midiToFreq(midiNote);
+      const vel = Math.max(0.01, Math.min(1, velocity / 127));
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      // ピアノに近い波形とフィルタ
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(3600, now);
+
+      const peakGain = vel * 0.5;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(peakGain, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, peakGain * 0.6), now + 0.3);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      this.activeSingleOscillators.set(midiNote, { osc, gain });
+    }
+  }
+
+  /**
+   * ピアノ鍵盤演奏用: 単音のノートオフ
+   */
+  public noteOff(midiNote: number) {
+    if (!this.audioCtx) return;
+
+    if (this.synth) {
+      this.synth.noteOff(0, midiNote);
+    }
+
+    const item = this.activeSingleOscillators.get(midiNote);
+    if (item) {
+      const now = this.audioCtx.currentTime;
+      const releaseTime = 0.15;
+      try {
+        item.gain.gain.cancelScheduledValues(now);
+        item.gain.gain.setValueAtTime(item.gain.gain.value, now);
+        item.gain.gain.exponentialRampToValueAtTime(0.00001, now + releaseTime);
+        item.osc.stop(now + releaseTime);
+        setTimeout(() => {
+          try {
+            item.osc.disconnect();
+            item.gain.disconnect();
+          } catch {
+            // ignore
+          }
+        }, releaseTime * 1000 + 50);
+      } catch {
+        // ignore
+      }
+      this.activeSingleOscillators.delete(midiNote);
+    }
+  }
+
+  /**
+   * ピアノ鍵盤クリック用: 指定ミリ秒後に自動ノートオフする単音プレビュー
+   */
+  public previewNote(midiNote: number, durationMs = 600, instrument = 0, velocity = 100) {
+    this.noteOn(midiNote, velocity, instrument);
+    setTimeout(() => {
+      this.noteOff(midiNote);
+    }, Math.max(100, durationMs));
   }
 
   /**

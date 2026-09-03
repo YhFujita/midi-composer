@@ -21,6 +21,8 @@ interface EditorToolbarProps {
   onOpenModal: () => void;
   onOpenChordModal: () => void;
   isChordModalOpen?: boolean;
+  onToggleKeyboard?: () => void;
+  isKeyboardOpen?: boolean;
   onInsertToEditor: (program: number, format: InsertFormatType) => void;
   onInsertText?: (text: string) => void;
   formatType: InsertFormatType;
@@ -33,6 +35,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onOpenModal,
   onOpenChordModal,
   isChordModalOpen,
+  onToggleKeyboard,
+  isKeyboardOpen,
   onInsertToEditor,
   onInsertText,
   formatType,
@@ -125,6 +129,27 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
           )}
         </button>
+
+        {/* ピアノ鍵盤ボタン: 開いている時はアクティブスタイル */}
+        {onToggleKeyboard && (
+          <button
+            type="button"
+            onClick={onToggleKeyboard}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-all text-xs font-bold shadow-sm group border ${
+              isKeyboardOpen
+                ? 'bg-blue-50 text-blue-700 border-blue-500 ring-1 ring-blue-400'
+                : 'bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-900 border-slate-300'
+            }`}
+            style={!isKeyboardOpen ? { backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 } : {}}
+            title="バーチャルピアノ鍵盤を開閉 (音の試聴やカーソル位置への音符入力)"
+          >
+            <span className="text-sm leading-none">🎹</span>
+            <span>ピアノ鍵盤</span>
+            {isKeyboardOpen && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+            )}
+          </button>
+        )}
 
         {/* 移調コマンドクイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
         {onInsertText && (

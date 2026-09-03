@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Header, LayoutOrientation } from './components/Layout/Header';
 import { ControlBar } from './components/Transport/ControlBar';
-import { MmlEditor, CursorPosition } from './components/Editor/MmlEditor';
+import { MmlEditor, CursorPosition, MmlEditorActions } from './components/Editor/MmlEditor';
 import { SheetMusic } from './components/Score/SheetMusic';
+import { PianoKeyboardPanel } from './components/Keyboard/PianoKeyboardPanel';
 import { MmlGuideModal } from './components/Editor/MmlGuideModal';
 import { SoundFontModal } from './components/SoundFont/SoundFontModal';
 import { parseMML, findBeatAtCursor } from './core/parser/mmlParser';
@@ -21,6 +22,13 @@ export const App: React.FC = () => {
 
   // エディタのテキストカーソル位置
   const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ lineNumber: 1, column: 1 });
+
+  // ピアノ鍵盤パネル表示状態
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState<boolean>(false);
+  // 選択中の楽器 (エディタ・鍵盤共有)
+  const [selectedProgram, setSelectedProgram] = useState<number>(0);
+  // エディタアクションref (音符挿入・削除用)
+  const editorActionsRef = React.useRef<MmlEditorActions | null>(null);
 
   // レイアウト分割方向 ('horizontal': 左右分割, 'vertical': 上下分割)
   const [layoutOrientation, setLayoutOrientation] = useState<LayoutOrientation>(() => {
@@ -326,6 +334,11 @@ export const App: React.FC = () => {
               onChange={handleMmlChange}
               errors={parsedScore.errors}
               onCursorChange={setCursorPosition}
+              selectedProgram={selectedProgram}
+              onSelectProgram={setSelectedProgram}
+              isKeyboardOpen={isKeyboardOpen}
+              onToggleKeyboard={() => setIsKeyboardOpen((prev) => !prev)}
+              editorActionsRef={editorActionsRef}
             />
           </div>
 
@@ -365,6 +378,15 @@ export const App: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* バーチャルピアノ鍵盤パネル (全幅ドック) */}
+      <PianoKeyboardPanel
+        isOpen={isKeyboardOpen}
+        onClose={() => setIsKeyboardOpen(false)}
+        onInsertText={(text) => editorActionsRef.current?.insertText(text)}
+        onBackspace={() => editorActionsRef.current?.deleteBackward()}
+        currentProgram={selectedProgram}
+      />
 
       {/* MML記法リファレンスモーダル */}
       <MmlGuideModal

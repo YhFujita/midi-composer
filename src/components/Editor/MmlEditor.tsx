@@ -11,19 +11,42 @@ export interface CursorPosition {
   column: number;
 }
 
+export interface MmlEditorActions {
+  insertText: (text: string) => void;
+  deleteBackward: () => void;
+}
+
 interface MmlEditorProps {
   value: string;
   onChange: (value: string) => void;
   errors: ParseError[];
   onCursorChange?: (position: CursorPosition) => void;
+  selectedProgram?: number;
+  onSelectProgram?: (program: number) => void;
+  isKeyboardOpen?: boolean;
+  onToggleKeyboard?: () => void;
+  editorActionsRef?: React.MutableRefObject<MmlEditorActions | null>;
 }
 
-export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors, onCursorChange }) => {
+export const MmlEditor: React.FC<MmlEditorProps> = ({
+  value,
+  onChange,
+  errors,
+  onCursorChange,
+  selectedProgram: propSelectedProgram,
+  onSelectProgram: propOnSelectProgram,
+  isKeyboardOpen,
+  onToggleKeyboard,
+  editorActionsRef,
+}) => {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
 
-  // 選択中の楽器・モーダル状態
-  const [selectedProgram, setSelectedProgram] = useState<number>(0);
+  // 選択中の楽器・モーダル状態 (propsがあれば優先)
+  const [internalProgram, setInternalProgram] = useState<number>(0);
+  const selectedProgram = propSelectedProgram !== undefined ? propSelectedProgram : internalProgram;
+  const setSelectedProgram = propOnSelectProgram || setInternalProgram;
+
   const [isInstrumentModalOpen, setIsInstrumentModalOpen] = useState<boolean>(false);
   const [isChordModalOpen, setIsChordModalOpen] = useState<boolean>(false);
   const [formatType, setFormatType] = useState<InsertFormatType>('with-comment');
@@ -386,15 +409,54 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors, o
     editor.focus();
   }, []);
 
+  // 1文字削除 (Backspace)
+  const deleteBackward = useCallback(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const selection = editor.getSelection();
+    if (!selection) return;
+
+    if (selection.isEmpty()) {
+      const pos = selection.getPosition();
+      if (pos.column > 1) {
+        const range = new monacoRef.current.Range(pos.lineNumber, pos.column - 1, pos.lineNumber, pos.column);
+        editor.executeEdits('keyboard-backspace', [{ range, text: '', forceMoveMarkers: true }]);
+      } else if (pos.lineNumber > 1) {
+        const prevLine = pos.lineNumber - 1;
+        const prevLineMaxCol = model.getLineMaxColumn(prevLine);
+        const range = new monacoRef.current.Range(prevLine, prevLineMaxCol, pos.lineNumber, 1);
+        editor.executeEdits('keyboard-backspace', [{ range, text: '', forceMoveMarkers: true }]);
+      }
+    } else {
+      editor.executeEdits('keyboard-backspace', [{ range: selection, text: '', forceMoveMarkers: true }]);
+    }
+    editor.focus();
+  }, []);
+
+  // 外部からのアクション参照を登録
+  useEffect(() => {
+    if (editorActionsRef) {
+      editorActionsRef.current = {
+        insertText: insertTextAtCursor,
+        deleteBackward,
+      };
+    }
+  }, [editorActionsRef, insertTextAtCursor, deleteBackward]);
+
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">
-      {/* エディタ上部ツールバー: 楽器選択・コード入力・移調挿入・出力ボタン */}
+      {/* エディタ上部ツールバー: 楽器選択・コード入力・ピアノ鍵盤・移調挿入・出力ボタン */}
       <EditorToolbar
         selectedProgram={selectedProgram}
         onSelectProgram={setSelectedProgram}
         onOpenModal={() => setIsInstrumentModalOpen(true)}
         onOpenChordModal={() => setIsChordModalOpen((prev) => !prev)}
         isChordModalOpen={isChordModalOpen}
+        onToggleKeyboard={onToggleKeyboard}
+        isKeyboardOpen={isKeyboardOpen}
         onInsertToEditor={insertInstrumentCode}
         onInsertText={insertTextAtCursor}
         formatType={formatType}
