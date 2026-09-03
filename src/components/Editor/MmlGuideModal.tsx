@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Music, Play, Layers, ArrowUpDown, Disc, Link2 } from 'lucide-react';
+import { X, BookOpen, Music, Play, Layers, ArrowUpDown, Disc, Link2, Sparkles } from 'lucide-react';
 
 interface MmlGuideModalProps {
   isOpen: boolean;
@@ -193,6 +193,39 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
                 <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">c4 & d4 & e4 / Slur( c4 d4 e4 f4 ) / SlurOn ... SlurOff</code>
                 <p className="text-slate-700 mt-1.5 font-medium">
                   🎶 <strong>スラー (Slur / レガート演奏)</strong>: 異なる高さの音符を <code>&amp;</code> で結ぶか、<code>Slur( ... )</code> または <code>SlurOn ... SlurOff</code> で囲むと、音と音の隙間をなくして滑らかに演奏するレガートになります。五線譜上にもフレーズ全体を包み込むスラー曲線が美しく描画されます。上部ツールバーの「タイ/スラーを挿入」からワンクリックで入力可能です。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 3連符・連符 (Tuplet) */}
+          <div>
+            <h3 className="text-sm font-bold text-teal-800 flex items-center mb-2">
+              <Sparkles className="w-4 h-4 mr-1.5" /> 7. 3連符・連符 (Tuplet)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-teal-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-teal-300 inline-block">{'{ c d e }4'}</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>8分3連符 (1拍に3音)</strong>: 波括弧内の音符を、後ろに指定した長さ（4分音符=1拍）に均等に割り振ります。五線譜上にも連符括弧と「3」の数字が美しく描画されます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-teal-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-teal-300 inline-block">{'{ c d e }8 / { c d e }2'}</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>16分3連符 / 4分3連符</strong>: 後ろの長さを変えることで、半拍に3音（16分3連符）や2拍に3音（4分3連符）も自由に作成できます。省略時はデフォルト長です。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-teal-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-teal-300 inline-block">{'{ [ceg] [dfa] [e g b] }4'}</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>和音・休符の3連符</strong>: 和音や休符 <code>r</code>、オクターブ <code>&gt; / &lt;</code> も連符内に自由に記述できます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-teal-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-teal-300 inline-block">c12 d12 e12 / c6 d6 e6</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>音長直接指定</strong>: 12分音符（8分3連符）や6分音符（4分3連符）、24分音符（16分3連符）による直接数値指定にも対応しています。ツールバーの「3連符を挿入」からワンクリックで入力できます。
                 </p>
               </div>
             </div>

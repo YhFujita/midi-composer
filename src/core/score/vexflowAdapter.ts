@@ -13,9 +13,11 @@ import {
   StaveTie,
   Curve,
   CurvePosition,
+  Tuplet,
 } from 'vexflow';
 import { ParsedScore, Track, NoteEvent, PedalEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
+import { getTripletInfo } from '../../utils/noteConverter';
 
 import { detectChordsForMeasure, ChordDetectionGranularity } from './chordDetector';
 
@@ -67,6 +69,13 @@ export function pitchToVexKey(pitch: string): { key: string; accidental?: string
  * 4分音符基準の長さ (duration) を VexFlow の音長コード ('w', 'h', 'q', '8', '16', '32') と付点有無に変換
  */
 export function durationToVexDuration(dur: number): { duration: string; isDotted: boolean } {
+  // 3連符などの連符長を優先判定
+  const trip = getTripletInfo(dur);
+  if (trip) {
+    const vexCode = trip.vexDuration === '4' ? 'q' : (trip.vexDuration === '2' ? 'h' : trip.vexDuration);
+    return { duration: vexCode, isDotted: false };
+  }
+
   const eps = 0.05;
 
   if (Math.abs(dur - 6.0) < eps) return { duration: 'wd', isDotted: true };
@@ -133,6 +142,7 @@ export interface VexMeasureItem {
 export interface VexMeasureOutput {
   notes: StaveNote[];
   items: VexMeasureItem[];
+  tuplets: Tuplet[];
 }
 
 /**
@@ -162,7 +172,7 @@ function createVexNotesForMeasure(
       Dot.buildAndAttach([restNote], { all: true });
     }
     items.push({ staveNote: restNote, noteEvents: [], isRest: true });
-    return { notes: [restNote], items };
+    return { notes: [restNote], items, tuplets: [] };
   }
 
   // 同じ startTime の音符を和音としてまとめる
@@ -306,7 +316,118 @@ function createVexNotesForMeasure(
     items.push({ staveNote: restNote, noteEvents: [], isRest: true });
   }
 
-  return { notes: vexNotes, items };
+  // 3連符・連符 (Tuplet) の検出と生成
+  const tuplets: Tuplet[] = [];
+
+  // 1. tupletGroupId を持つ明示的連符のグループ化
+  const explicitTupletGroups = new Map<number, StaveNote[]>();
+  const explicitTupletConfig = new Map<number, { numNotes: number; notesOccupied: number }>();
+  items.forEach((it) => {
+    if (!it.isRest && it.noteEvents.length > 0) {
+      const firstEv = it.noteEvents[0];
+      if (firstEv.tupletGroupId !== undefined) {
+        if (!explicitTupletGroups.has(firstEv.tupletGroupId)) {
+          explicitTupletGroups.set(firstEv.tupletGroupId, []);
+          explicitTupletConfig.set(firstEv.tupletGroupId, {
+            numNotes: firstEv.tupletNumber || 3,
+            notesOccupied: firstEv.tupletOccupied || 2,
+          });
+        }
+        explicitTupletGroups.get(firstEv.tupletGroupId)!.push(it.staveNote);
+      }
+    }
+  });
+
+  explicitTupletGroups.forEach((staveNotes, gId) => {
+    if (staveNotes.length >= 2) {
+      const cfg = explicitTupletConfig.get(gId)!;
+      try {
+        const tuplet = new Tuplet(staveNotes, {
+          numNotes: cfg.numNotes,
+          notesOccupied: cfg.notesOccupied,
+          location: Tuplet.LOCATION_TOP,
+        });
+        tuplets.push(tuplet);
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  // 2. 音長直接指定 (c12, c6 等) による3連符のグループ化 (tupletGroupId を持たないもの)
+  let consecutiveTriplets: StaveNote[] = [];
+  let currentTripDuration: number | null = null;
+
+  items.forEach((it) => {
+    if (!it.isRest && it.noteEvents.length > 0) {
+      const ev = it.noteEvents[0];
+      if (ev.tupletGroupId === undefined) {
+        const trip = getTripletInfo(ev.duration);
+        if (trip) {
+          if (currentTripDuration !== null && Math.abs(currentTripDuration - ev.duration) < 0.02) {
+            consecutiveTriplets.push(it.staveNote);
+          } else {
+            if (consecutiveTriplets.length === 3) {
+              try {
+                tuplets.push(
+                  new Tuplet(consecutiveTriplets, {
+                    numNotes: 3,
+                    notesOccupied: 2,
+                    location: Tuplet.LOCATION_TOP,
+                  })
+                );
+              } catch {}
+            }
+            consecutiveTriplets = [it.staveNote];
+            currentTripDuration = ev.duration;
+          }
+
+          if (consecutiveTriplets.length === 3) {
+            try {
+              tuplets.push(
+                new Tuplet(consecutiveTriplets, {
+                  numNotes: 3,
+                  notesOccupied: 2,
+                  location: Tuplet.LOCATION_TOP,
+                })
+              );
+            } catch {}
+            consecutiveTriplets = [];
+            currentTripDuration = null;
+          }
+          return;
+        }
+      }
+    }
+
+    if (consecutiveTriplets.length === 3) {
+      try {
+        tuplets.push(
+          new Tuplet(consecutiveTriplets, {
+            numNotes: 3,
+            notesOccupied: 2,
+            location: Tuplet.LOCATION_TOP,
+          })
+        );
+      } catch {}
+    }
+    consecutiveTriplets = [];
+    currentTripDuration = null;
+  });
+
+  if (consecutiveTriplets.length === 3) {
+    try {
+      tuplets.push(
+        new Tuplet(consecutiveTriplets, {
+          numNotes: 3,
+          notesOccupied: 2,
+          location: Tuplet.LOCATION_TOP,
+        })
+      );
+    } catch {}
+  }
+
+  return { notes: vexNotes, items, tuplets };
 }
 
 /**
@@ -613,7 +734,7 @@ export function renderScoreToSvg(
         }
       }
 
-      const { notes: vexNotes, items: measureItems } = createVexNotesForMeasure(
+      const { notes: vexNotes, items: measureItems, tuplets: measureTuplets } = createVexNotesForMeasure(
         mGroup.notes,
         mGroup.measureIndex,
         beatsPerMeasure,
@@ -642,6 +763,13 @@ export function renderScoreToSvg(
 
           voice.draw(ctx, stave);
           beams.forEach((b) => b.setContext(ctx).draw());
+          measureTuplets.forEach((t) => {
+            try {
+              t.setContext(ctx).draw();
+            } catch {
+              // ignore
+            }
+          });
 
           // タイおよびスラーの描画
           if (options.showTiesAndSlurs !== false) {
@@ -880,7 +1008,7 @@ export function renderFullScoreToSvg(
 
         // 音符生成
         const notes = trackMeasureMaps[tIdx].get(mIdx) || [];
-        const { notes: vexNotes, items: measureItems } = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
+        const { notes: vexNotes, items: measureItems, tuplets: measureTuplets } = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
 
         if (vexNotes.length > 0) {
           try {
@@ -903,6 +1031,13 @@ export function renderFullScoreToSvg(
 
             voice.draw(ctx, stave);
             beams.forEach((b) => b.setContext(ctx).draw());
+            measureTuplets.forEach((t) => {
+              try {
+                t.setContext(ctx).draw();
+              } catch {
+                // ignore
+              }
+            });
 
             // タイおよびスラーの描画
             if (options.showTiesAndSlurs !== false) {

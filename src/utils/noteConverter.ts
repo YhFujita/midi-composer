@@ -91,3 +91,38 @@ export function parseDurationLength(lenStr: string, defaultLength: number = 4): 
 
   return totalDuration > 0 ? totalDuration : 4 / defaultLength;
 }
+
+/**
+ * 音長 (4分音符基準) が3連符（8分3連符、16分3連符、4分3連符等）に該当するかを判定する
+ */
+export function getTripletInfo(dur: number): {
+  isTriplet: boolean;
+  vexDuration: string; // VexFlow で指定する基礎音長コード ('8', '16', '4' 等)
+  standardDuration: number; // 3連符でない場合の基本音長 (4分音符基準)
+} | null {
+  const eps = 0.025;
+
+  // 32分3連符: 1/12拍 ≈ 0.0833 (32分音符 0.125拍 の 2/3)
+  if (Math.abs(dur - (1 / 12)) < eps) {
+    return { isTriplet: true, vexDuration: '32', standardDuration: 0.125 };
+  }
+  // 16分3連符: 1/6拍 ≈ 0.1667 (16分音符 0.25拍 の 2/3)
+  if (Math.abs(dur - (1 / 6)) < eps) {
+    return { isTriplet: true, vexDuration: '16', standardDuration: 0.25 };
+  }
+  // 8分3連符: 1/3拍 ≈ 0.3333 (8分音符 0.5拍 の 2/3)
+  if (Math.abs(dur - (1 / 3)) < eps) {
+    return { isTriplet: true, vexDuration: '8', standardDuration: 0.5 };
+  }
+  // 4分3連符: 2/3拍 ≈ 0.6667 (4分音符 1.0拍 の 2/3)
+  if (Math.abs(dur - (2 / 3)) < eps) {
+    return { isTriplet: true, vexDuration: '4', standardDuration: 1.0 };
+  }
+  // 2分3連符: 4/3拍 ≈ 1.3333 (2分音符 2.0拍 の 2/3)
+  if (Math.abs(dur - (4 / 3)) < eps) {
+    return { isTriplet: true, vexDuration: '2', standardDuration: 2.0 };
+  }
+
+  return null;
+}
+

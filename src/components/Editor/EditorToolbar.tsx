@@ -218,6 +218,39 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </select>
           </div>
         )}
+
+        {/* 3連符クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置に3連符（Tuplet）を挿入 (五線譜にも連符括弧が描画されます)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                3連符を挿入...
+              </option>
+              <optgroup label="波括弧記法 (推奨・自動3連符)">
+                <option value="{ c d e }4 /* 8分3連符 (1拍に3音) */">{'{ c d e }4 /* 8分3連符 (1拍に3音) */'}</option>
+                <option value="{ c d e }8 /* 16分3連符 (半拍に3音) */">{'{ c d e }8 /* 16分3連符 (半拍に3音) */'}</option>
+                <option value="{ c d e }2 /* 4分3連符 (2拍に3音) */">{'{ c d e }2 /* 4分3連符 (2拍に3音) */'}</option>
+                <option value="{ [ceg] [dfa] [e g b] }4 /* 和音3連符 */">{'{ [ceg] [dfa] [e g b] }4 /* 和音3連符 */'}</option>
+              </optgroup>
+              <optgroup label="直接音長指定 (12分/6分/24分)">
+                <option value="c12 d12 e12 /* 12分音符 (8分3連符) */">c12 d12 e12 /* 12分音符 (8分3連符) */</option>
+                <option value="c6 d6 e6 /* 6分音符 (4分3連符) */">c6 d6 e6 /* 6分音符 (4分3連符) */</option>
+                <option value="c24 d24 e24 /* 24分音符 (16分3連符) */">c24 d24 e24 /* 24分音符 (16分3連符) */</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

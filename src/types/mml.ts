@@ -26,6 +26,10 @@ export interface NoteEvent {
   slurGroupId?: number;     // 所属するスラーグループID
   isSlurStart?: boolean;    // スラーの開始音か
   isSlurEnd?: boolean;      // スラーの終了音か
+  isTuplet?: boolean;       // 連符（3連符など）の構成音か
+  tupletGroupId?: number;   // 所属する連符グループID
+  tupletNumber?: number;    // 連符の音数 (例: 3)
+  tupletOccupied?: number;  // 本来の音数 (例: 2)
 }
 
 export interface PedalEvent {

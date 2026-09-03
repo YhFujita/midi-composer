@@ -1,5 +1,5 @@
 import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem } from '../../types/mml';
-import { pitchToMidi, midiToPitch, parseDurationLength } from '../../utils/noteConverter';
+import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo } from '../../utils/noteConverter';
 
 interface TrackState {
   id: number;
@@ -26,6 +26,7 @@ interface TrackState {
   currentExplicitSlurId?: number; // 現在のスラーグループID
   explicitSlurNotes: NoteEvent[]; // 明示的スラーに属する音符リスト
   currentSlurGroupCount: number; // スラーグループ採番カウンタ
+  currentTupletGroupCount: number; // 連符グループ採番カウンタ
 }
 
 export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
@@ -77,6 +78,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         explicitSlurParenDepth: 0,
         explicitSlurNotes: [],
         currentSlurGroupCount: 0,
+        currentTupletGroupCount: 0,
       });
     }
     return tracksMap.get(trackId)!;
@@ -537,6 +539,311 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
+      // 9.5 連符 (3連符など): { c d e }4, { c d e }8, { [ceg] [dfa] [egb] }4, { c r e }4 等
+      if (char === '{') {
+        const tupletCloseIdx = remaining.indexOf('}');
+        if (tupletCloseIdx === -1) {
+          errors.push({
+            message: '連符の終了記号 "}" が見つかりません',
+            line: lineNumber,
+            column: col + 1,
+          });
+          col++;
+          continue;
+        }
+
+        const tupletContent = remaining.slice(1, tupletCloseIdx);
+        const afterTuplet = remaining.slice(tupletCloseIdx + 1);
+        const tupletLenMatch = afterTuplet.match(/^((?:[\^&]?\d*\.*)+)/);
+        const tupletLenStr = tupletLenMatch ? tupletLenMatch[1] : '';
+        const tupletLenCharsUsed = tupletLenMatch ? tupletLenMatch[0].length : 0;
+        const tupletDuration = parseDurationLength(tupletLenStr, currentTrack.defaultLength);
+
+        // 連符内の要素を解析
+        interface ParsedTupletItem {
+          type: 'note' | 'chord' | 'rest';
+          colOffset: number;
+          rawLength: number;
+          pitch?: string;
+          midiNote?: number;
+          originalPitch?: string;
+          keyShift?: number;
+          chordNotes?: { pitch: string; midiNote: number; originalPitch: string; keyShift: number }[];
+          isStrum?: boolean;
+          strumDirection?: 'down' | 'up';
+          strumDelaySec?: number;
+        }
+
+        const tupletItems: ParsedTupletItem[] = [];
+        let tIdx = 0;
+        let tempOctave = currentTrack.octave;
+        let tempVelocity = currentTrack.velocity;
+
+        while (tIdx < tupletContent.length) {
+          const tChar = tupletContent[tIdx];
+          if (/\s/.test(tChar)) {
+            tIdx++;
+            continue;
+          }
+
+          const tRemaining = tupletContent.slice(tIdx);
+
+          // オクターブ操作
+          if (tChar === '>') {
+            if (tempOctave < 9) tempOctave++;
+            tIdx++;
+            continue;
+          }
+          if (tChar === '<') {
+            if (tempOctave > 0) tempOctave--;
+            tIdx++;
+            continue;
+          }
+          const tOctMatch = tRemaining.match(/^(?:o\s*(\d+)|OCTAVE\(?=?\s*(\d+)\)?)/i);
+          if (tOctMatch) {
+            const octVal = parseInt(tOctMatch[1] || tOctMatch[2], 10);
+            if (octVal >= 0 && octVal <= 9) tempOctave = octVal;
+            tIdx += tOctMatch[0].length;
+            continue;
+          }
+
+          // ベロシティ操作
+          const tVelMatch = tRemaining.match(/^(?:v\s*(\d+)|VOLUME\(?=?\s*(\d+)\)?)/i);
+          if (tVelMatch) {
+            const vVal = parseInt(tVelMatch[1] || tVelMatch[2], 10);
+            tempVelocity = Math.max(0, Math.min(127, vVal));
+            tIdx += tVelMatch[0].length;
+            continue;
+          }
+          if (tChar === '(') {
+            tempVelocity = Math.min(127, tempVelocity + 8);
+            tIdx++;
+            continue;
+          }
+          if (tChar === ')') {
+            tempVelocity = Math.max(0, tempVelocity - 8);
+            tIdx++;
+            continue;
+          }
+
+          // 休符
+          if (tChar.toLowerCase() === 'r') {
+            tupletItems.push({
+              type: 'rest',
+              colOffset: tIdx,
+              rawLength: 1,
+            });
+            tIdx++;
+            continue;
+          }
+
+          // 和音
+          if (tChar === '[') {
+            const closeBracket = tRemaining.indexOf(']');
+            if (closeBracket !== -1) {
+              let insideChord = tRemaining.slice(1, closeBracket);
+              let cOct = tempOctave;
+              const cNotes: { pitch: string; midiNote: number; originalPitch: string; keyShift: number }[] = [];
+              let ci = 0;
+              let isStrum = false;
+              let strumDirection: 'down' | 'up' = 'down';
+              let strumDelaySec = 0.035;
+
+              const strumM = insideChord.match(/^(\s*~(?:\^|\-)?(\d+)?\s*)/);
+              if (strumM) {
+                isStrum = true;
+                if (strumM[1].includes('^') || strumM[1].includes('-')) strumDirection = 'up';
+                if (strumM[2]) {
+                  const num = parseInt(strumM[2], 10);
+                  if (num === 16) strumDelaySec = 0.07;
+                  else if (num === 32) strumDelaySec = 0.035;
+                  else if (num === 64) strumDelaySec = 0.018;
+                  else if (num > 0) strumDelaySec = Math.max(0.01, Math.min(0.2, 1.0 / num));
+                }
+                insideChord = insideChord.slice(strumM[0].length);
+              }
+
+              while (ci < insideChord.length) {
+                const cc = insideChord[ci];
+                if (cc === '>') { if (cOct < 9) cOct++; ci++; continue; }
+                if (cc === '<') { if (cOct > 0) cOct--; ci++; continue; }
+                if (cc === "'") { if (cOct < 9) cOct++; ci++; continue; }
+                const nm = insideChord.slice(ci).match(/^([a-gA-G])([#\+\-_b]?)/);
+                if (nm) {
+                  const pLet = nm[1].toUpperCase();
+                  let acc = nm[2] || '';
+                  if (acc === '+') acc = '#';
+                  if (acc === '_') acc = '-';
+                  const fPitch = `${pLet}${acc}${cOct}`;
+                  const bMidi = pitchToMidi(fPitch);
+                  const mShift = getMasterKeyAt(currentTrack.currentTime);
+                  const tShift = currentTrack.keyShift + mShift + uiGlobalKeyShift;
+                  const transMidi = Math.max(0, Math.min(127, bMidi + tShift));
+                  cNotes.push({
+                    pitch: midiToPitch(transMidi),
+                    midiNote: transMidi,
+                    originalPitch: fPitch,
+                    keyShift: tShift,
+                  });
+                  ci += nm[0].length;
+                  continue;
+                }
+                ci++;
+              }
+
+              tupletItems.push({
+                type: 'chord',
+                colOffset: tIdx,
+                rawLength: closeBracket + 1,
+                chordNotes: cNotes,
+                isStrum,
+                strumDirection,
+                strumDelaySec,
+              });
+              tIdx += closeBracket + 1;
+              continue;
+            }
+          }
+
+          // 単音符
+          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_b]?)/i);
+          if (nMatch) {
+            const pLet = nMatch[1].toUpperCase();
+            let acc = nMatch[2] || '';
+            if (acc === '+') acc = '#';
+            if (acc === '_') acc = '-';
+            const fPitch = `${pLet}${acc}${tempOctave}`;
+            const bMidi = pitchToMidi(fPitch);
+            const mShift = getMasterKeyAt(currentTrack.currentTime);
+            const tShift = currentTrack.keyShift + mShift + uiGlobalKeyShift;
+            const transMidi = Math.max(0, Math.min(127, bMidi + tShift));
+            tupletItems.push({
+              type: 'note',
+              colOffset: tIdx,
+              rawLength: nMatch[0].length,
+              pitch: midiToPitch(transMidi),
+              midiNote: transMidi,
+              originalPitch: fPitch,
+              keyShift: tShift,
+            });
+            tIdx += nMatch[0].length;
+            continue;
+          }
+
+          tIdx++;
+        }
+
+        currentTrack.octave = tempOctave;
+        currentTrack.velocity = tempVelocity;
+
+        if (tupletItems.length > 0) {
+          const tupletId = ++currentTrack.currentTupletGroupCount;
+          const numNotes = tupletItems.length;
+          const notesOccupied = numNotes === 3 ? 2 : (numNotes === 5 || numNotes === 6 || numNotes === 7 ? 4 : 2);
+          const stepDuration = tupletDuration / numNotes;
+          const tupletStartBeat = currentTrack.currentTime;
+
+          tupletItems.forEach((item, itemIdx) => {
+            const itemStartBeat = tupletStartBeat + (tupletDuration * itemIdx) / numNotes;
+            const itemCol = col + 1 + 1 + item.colOffset;
+
+            if (item.type === 'rest') {
+              currentTrack.pendingTieOrSlur = false;
+              currentTrack.lastNoteGroup = null;
+              timelineItems.push({
+                line: lineNumber,
+                startColumn: itemCol,
+                endColumn: itemCol + item.rawLength,
+                trackId: currentTrack.id,
+                beat: itemStartBeat,
+                type: 'rest',
+              });
+            } else if (item.type === 'note' && item.pitch && item.midiNote !== undefined) {
+              const noteEvent: NoteEvent = {
+                pitch: item.pitch,
+                midiNote: item.midiNote,
+                originalPitch: item.originalPitch,
+                keyShift: item.keyShift,
+                startTime: itemStartBeat,
+                duration: stepDuration,
+                velocity: currentTrack.velocity,
+                gateRate: currentTrack.gateRate,
+                gateDuration: stepDuration * currentTrack.gateRate,
+                trackId: currentTrack.id,
+                channel: currentTrack.channel,
+                instrument: currentTrack.instrument,
+                isTuplet: true,
+                tupletGroupId: tupletId,
+                tupletNumber: numNotes,
+                tupletOccupied: notesOccupied,
+                line: lineNumber,
+                column: itemCol,
+              };
+              registerNotesToTrack(currentTrack, [noteEvent], false);
+              timelineItems.push({
+                line: lineNumber,
+                startColumn: itemCol,
+                endColumn: itemCol + item.rawLength,
+                trackId: currentTrack.id,
+                beat: itemStartBeat,
+                type: 'note',
+              });
+            } else if (item.type === 'chord' && item.chordNotes && item.chordNotes.length > 0) {
+              const chordNotes: NoteEvent[] = item.chordNotes.map((cn) => ({
+                pitch: cn.pitch,
+                midiNote: cn.midiNote,
+                originalPitch: cn.originalPitch,
+                keyShift: cn.keyShift,
+                startTime: itemStartBeat,
+                duration: stepDuration,
+                velocity: currentTrack.velocity,
+                gateRate: currentTrack.gateRate,
+                gateDuration: stepDuration * currentTrack.gateRate,
+                trackId: currentTrack.id,
+                channel: currentTrack.channel,
+                instrument: currentTrack.instrument,
+                isChord: true,
+                isTuplet: true,
+                tupletGroupId: tupletId,
+                tupletNumber: numNotes,
+                tupletOccupied: notesOccupied,
+                line: lineNumber,
+                column: itemCol,
+              }));
+
+              if (item.isStrum) {
+                const sorted = [...chordNotes].sort((a, b) =>
+                  item.strumDirection === 'down' ? a.midiNote - b.midiNote : b.midiNote - a.midiNote
+                );
+                sorted.forEach((note, sIdx) => {
+                  note.isStrum = true;
+                  note.strumDirection = item.strumDirection;
+                  note.strumDelaySec = item.strumDelaySec;
+                  note.strumOrder = sIdx;
+                  note.strumTotal = sorted.length;
+                });
+              }
+
+              registerNotesToTrack(currentTrack, chordNotes, false);
+              timelineItems.push({
+                line: lineNumber,
+                startColumn: itemCol,
+                endColumn: itemCol + item.rawLength,
+                trackId: currentTrack.id,
+                beat: itemStartBeat,
+                type: 'note',
+              });
+            }
+          });
+
+          currentTrack.currentTime = tupletStartBeat + tupletDuration;
+        }
+
+        const tupletFullTokenLen = 1 + tupletCloseIdx + tupletLenCharsUsed;
+        col += tupletFullTokenLen;
+        continue;
+      }
+
       // 10. 和音: [ceg]4, [~ceg]4, [~^ceg]4, [ceg]~4 など (バラシ演奏対応)
       if (char === '[') {
         const chordCloseIdx = remaining.indexOf(']');
@@ -651,6 +958,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               const transposedMidi = Math.max(0, Math.min(127, baseMidi + totalShift));
               const finalPitch = midiToPitch(transposedMidi);
 
+              const chordTripInfo = getTripletInfo(chordDuration);
               chordNotes.push({
                 pitch: finalPitch,
                 midiNote: transposedMidi,
@@ -665,6 +973,9 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 channel: currentTrack.channel,
                 instrument: currentTrack.instrument,
                 isChord: true,
+                isTuplet: chordTripInfo ? true : undefined,
+                tupletNumber: chordTripInfo ? 3 : undefined,
+                tupletOccupied: chordTripInfo ? 2 : undefined,
                 line: lineNumber,
                 column: col + 1,
               });
@@ -751,6 +1062,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         
         const noteLenStr = singleNoteMatch[3];
         const duration = parseDurationLength(noteLenStr, currentTrack.defaultLength);
+        const tripInfo = getTripletInfo(duration);
         const fullPitch = `${noteLetter}${accidental}${currentTrack.octave}`;
         const baseMidi = pitchToMidi(fullPitch);
         const masterShift = getMasterKeyAt(currentTrack.currentTime);
@@ -771,6 +1083,9 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           trackId: currentTrack.id,
           channel: currentTrack.channel,
           instrument: currentTrack.instrument,
+          isTuplet: tripInfo ? true : undefined,
+          tupletNumber: tripInfo ? 3 : undefined,
+          tupletOccupied: tripInfo ? 2 : undefined,
           line: lineNumber,
           column: col + 1,
         };

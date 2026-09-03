@@ -584,6 +584,149 @@ describe('MML Parser', () => {
       expect(notes[1].hasTieFromPrev).toBeFalsy();
     });
   });
+
+  describe('3連符 (Tuplet) 機能', () => {
+    it('{ c d e }4 で8分3連符 (4分音符を3分割) がパースされ、各音の長さが1/3拍になること', () => {
+      const code = '{ c d e }4 f4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      // 連符の3音
+      const expectedStep = 1.0 / 3;
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[0].startTime).toBeCloseTo(0, 5);
+      expect(notes[0].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[0].isTuplet).toBe(true);
+      expect(notes[0].tupletNumber).toBe(3);
+      expect(notes[0].tupletOccupied).toBe(2);
+
+      expect(notes[1].pitch).toBe('D4');
+      expect(notes[1].startTime).toBeCloseTo(expectedStep, 5);
+      expect(notes[1].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[1].isTuplet).toBe(true);
+
+      expect(notes[2].pitch).toBe('E4');
+      expect(notes[2].startTime).toBeCloseTo(expectedStep * 2, 5);
+      expect(notes[2].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[2].isTuplet).toBe(true);
+
+      // 連符グループIDが同一であること
+      expect(notes[0].tupletGroupId).toBeDefined();
+      expect(notes[1].tupletGroupId).toBe(notes[0].tupletGroupId);
+      expect(notes[2].tupletGroupId).toBe(notes[0].tupletGroupId);
+
+      // 後続の f4 は正確に 1.0 拍目から始まること
+      expect(notes[3].pitch).toBe('F4');
+      expect(notes[3].startTime).toBeCloseTo(1.0, 5);
+      expect(notes[3].duration).toBe(1.0);
+    });
+
+    it('{ c d e }8 で16分3連符 (8分音符を3分割) がパースされ、各音の長さが1/6拍になること', () => {
+      const code = '{ c d e }8 g8';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      const expectedStep = 0.5 / 3; // 1/6拍
+      expect(notes[0].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[1].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[2].duration).toBeCloseTo(expectedStep, 5);
+
+      // 後続の g8 は 0.5 拍目から始まること
+      expect(notes[3].pitch).toBe('G4');
+      expect(notes[3].startTime).toBeCloseTo(0.5, 5);
+    });
+
+    it('{ c d e }2 で4分3連符 (2分音符を3分割) がパースされ、各音の長さが2/3拍になること', () => {
+      const code = '{ c d e }2 c2';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      const expectedStep = 2.0 / 3; // 2/3拍
+      expect(notes[0].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[1].duration).toBeCloseTo(expectedStep, 5);
+      expect(notes[2].duration).toBeCloseTo(expectedStep, 5);
+
+      // 後続の c2 は 2.0 拍目から始まること
+      expect(notes[3].startTime).toBeCloseTo(2.0, 5);
+    });
+
+    it('和音を含む3連符 { [ceg] [dfa] [e g b] }4 が正しくパースされること', () => {
+      const code = '{ [ceg] [dfa] [e g b] }4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      // 3和音 × 3音 = 9音
+      expect(notes).toHaveLength(9);
+
+      const firstChord = notes.slice(0, 3);
+      firstChord.forEach((n) => {
+        expect(n.startTime).toBeCloseTo(0, 5);
+        expect(n.duration).toBeCloseTo(1.0 / 3, 5);
+        expect(n.isTuplet).toBe(true);
+        expect(n.isChord).toBe(true);
+      });
+    });
+
+    it('休符を含む3連符 { c r e }4 が正しく処理され、全体で1拍進むこと', () => {
+      const code = '{ c r e }4 g4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      // c と e と g の 3音
+      expect(notes).toHaveLength(3);
+
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[0].startTime).toBeCloseTo(0, 5);
+
+      expect(notes[1].pitch).toBe('E4');
+      expect(notes[1].startTime).toBeCloseTo(2.0 / 3, 5); // 0, 1/3(休符), 2/3(E4)
+
+      // 後続の g4 は 1.0 拍目から始まること
+      expect(notes[2].pitch).toBe('G4');
+      expect(notes[2].startTime).toBeCloseTo(1.0, 5);
+    });
+
+    it('オクターブ操作を含む3連符 { c > d < e }4 が正しく音高を反映すること', () => {
+      const code = 'o4 { c > d < e }4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[1].pitch).toBe('D5'); // > でオクターブ上がっている
+      expect(notes[2].pitch).toBe('E4'); // < で戻っている
+    });
+
+    it('音長直接指定 c12 d12 e12 で各音に isTuplet が付与され、後続音が1.0拍目から始まること', () => {
+      const code = 'c12 d12 e12 f4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      expect(notes[0].isTuplet).toBe(true);
+      expect(notes[1].isTuplet).toBe(true);
+      expect(notes[2].isTuplet).toBe(true);
+      expect(notes[0].duration).toBeCloseTo(1.0 / 3, 5);
+
+      // f4 の開始時刻が 1.0 拍
+      expect(notes[3].startTime).toBeCloseTo(1.0, 5);
+    });
+  });
 });
 
 
