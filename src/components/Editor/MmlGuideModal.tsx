@@ -111,6 +111,12 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
                 <p className="text-slate-700 mt-1.5 font-medium">トラック指定 / 音色 (0:ピアノ, 48:Strings 等)</p>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-amber-900 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-amber-300 inline-block">[~ceg]4 / [~^ceg]4 / [ceg]~4</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🎸 <strong>バラシ (ギターストローク・ロール演奏)</strong>: チルダ記号「~」を付けると、アルペジオまで分解せずギターをジャララーンとストロークするような心地よい時間差演奏になります (~^ で逆かき上げストローク)。楽譜上にもアルペジオ波線記号が美しく描画されます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
                 <code className="text-amber-900 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-amber-300 inline-block">// 1行コメント / /* 複数行 */ / ; コメント</code>
                 <p className="text-slate-700 mt-1.5 font-medium">コメント記述でメモや小節番号を整理できます</p>
               </div>

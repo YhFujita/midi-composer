@@ -124,7 +124,11 @@ export function generateMidiBlob(score: ParsedScore): Blob {
     // ノートオン / ノートオフ イベント
     track.notes.forEach((note) => {
       const dur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
-      const startTick = Math.round(note.startTime * PPQ);
+      // バラシ (ストローク) の微小ディレイ計算 (1音あたり約 20 ticks)
+      const strumOffsetTicks = (note.isStrum && note.strumOrder)
+        ? Math.round(note.strumOrder * 20)
+        : 0;
+      const startTick = Math.round(note.startTime * PPQ) + strumOffsetTicks;
       const endTick = Math.max(startTick + 1, Math.round((note.startTime + dur) * PPQ));
       const midiNote = Math.max(0, Math.min(127, note.midiNote));
       const velocity = Math.max(1, Math.min(127, note.velocity));

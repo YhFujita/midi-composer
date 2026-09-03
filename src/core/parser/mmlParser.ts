@@ -346,18 +346,86 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 10. 和音: [ceg]4, [c e g]8. など
+      // 10. 和音: [ceg]4, [~ceg]4, [~^ceg]4, [ceg]~4 など (バラシ演奏対応)
       if (char === '[') {
         const chordCloseIdx = remaining.indexOf(']');
         if (chordCloseIdx !== -1) {
-          const chordContent = remaining.slice(1, chordCloseIdx);
-          const afterChord = remaining.slice(chordCloseIdx + 1);
+          let chordContent = remaining.slice(1, chordCloseIdx);
+          let afterChord = remaining.slice(chordCloseIdx + 1);
+
+          // バラシ (ギターストローク / ロール) 記号の検出
+          let isStrum = false;
+          let strumDirection: 'down' | 'up' = 'down';
+          let strumDelaySec = 0.035; // デフォルトストローク間隔 (約35ms)
+
+          // 1. コード内部先頭のチルダ: [~ceg]4, [~^ceg]4, [~32ceg]4
+          const insideStrumMatch = chordContent.match(/^(\s*~(?:\^|\-)?(\d+)?\s*)/);
+          if (insideStrumMatch) {
+            isStrum = true;
+            const fullMatch = insideStrumMatch[1];
+            if (fullMatch.includes('^') || fullMatch.includes('-')) {
+              strumDirection = 'up';
+            }
+            const speedVal = insideStrumMatch[2];
+            if (speedVal) {
+              const num = parseInt(speedVal, 10);
+              if (num === 16) strumDelaySec = 0.07;
+              else if (num === 32) strumDelaySec = 0.035;
+              else if (num === 64) strumDelaySec = 0.018;
+              else if (num > 0) strumDelaySec = Math.max(0.01, Math.min(0.2, 1.0 / num));
+            }
+            chordContent = chordContent.slice(insideStrumMatch[0].length);
+          }
+
+          // 2. コード内部末尾のチルダ: [ceg~]4
+          const insideEndStrumMatch = chordContent.match(/(\s*~(?:\^|\-)?(\d+)?\s*)$/);
+          if (insideEndStrumMatch && !isStrum) {
+            isStrum = true;
+            if (insideEndStrumMatch[1].includes('^') || insideEndStrumMatch[1].includes('-')) {
+              strumDirection = 'up';
+            }
+            chordContent = chordContent.slice(0, -insideEndStrumMatch[0].length);
+          }
+
+          // 3. コード直後のチルダ: [ceg]~4, [ceg]~^4
+          let afterStrumLen = 0;
+          const afterStrumMatch = afterChord.match(/^~(?:\^|\-)?(\d+)?/);
+          if (afterStrumMatch) {
+            isStrum = true;
+            if (afterStrumMatch[0].includes('^') || afterStrumMatch[0].includes('-')) {
+              strumDirection = 'up';
+            }
+            if (afterStrumMatch[1]) {
+              const num = parseInt(afterStrumMatch[1], 10);
+              if (num === 16) strumDelaySec = 0.07;
+              else if (num === 32) strumDelaySec = 0.035;
+              else if (num === 64) strumDelaySec = 0.018;
+              else if (num > 0) strumDelaySec = Math.max(0.01, Math.min(0.2, 1.0 / num));
+            }
+            afterStrumLen = afterStrumMatch[0].length;
+            afterChord = afterChord.slice(afterStrumLen);
+          }
+
           // 和音の長さを解析
           const chordLenMatch = afterChord.match(/^((?:[\^&]?\d*\.*)+)/);
           const chordLenStr = chordLenMatch ? chordLenMatch[1] : '';
+          let lenCharsUsed = chordLenMatch ? chordLenMatch[0].length : 0;
+          const afterLen = afterChord.slice(lenCharsUsed);
+
+          // 4. 音長直後のチルダ: [ceg]4~
+          const trailingStrumMatch = afterLen.match(/^~(?:\^|\-)?(\d+)?/);
+          if (trailingStrumMatch) {
+            isStrum = true;
+            if (trailingStrumMatch[0].includes('^') || trailingStrumMatch[0].includes('-')) {
+              strumDirection = 'up';
+            }
+            lenCharsUsed += trailingStrumMatch[0].length;
+          }
+
           const chordDuration = parseDurationLength(chordLenStr, currentTrack.defaultLength);
 
-          // 和音内の各音符を解析 (オクターブ記号 > < ' も考慮)
+          // 和音内の各音符を解析
+          const chordNotes: NoteEvent[] = [];
           let chordOctave = currentTrack.octave;
           let cIdx = 0;
           while (cIdx < chordContent.length) {
@@ -392,7 +460,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               const transposedMidi = Math.max(0, Math.min(127, baseMidi + totalShift));
               const finalPitch = midiToPitch(transposedMidi);
 
-              currentTrack.notes.push({
+              chordNotes.push({
                 pitch: finalPitch,
                 midiNote: transposedMidi,
                 originalPitch: fullPitch,
@@ -417,8 +485,28 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             cIdx++;
           }
 
+          // バラシ設定を構成音に付与
+          if (chordNotes.length > 0) {
+            if (isStrum) {
+              // ピッチ順（低音→高音 / 高音→低音）で発音インデックスを設定
+              const sorted = [...chordNotes].sort((a, b) =>
+                strumDirection === 'down' ? a.midiNote - b.midiNote : b.midiNote - a.midiNote
+              );
+
+              sorted.forEach((note, idx) => {
+                note.isStrum = true;
+                note.strumDirection = strumDirection;
+                note.strumDelaySec = strumDelaySec;
+                note.strumOrder = idx;
+                note.strumTotal = sorted.length;
+              });
+            }
+
+            chordNotes.forEach((n) => currentTrack.notes.push(n));
+          }
+
           currentTrack.currentTime += chordDuration;
-          col += 1 + chordCloseIdx + (chordLenMatch ? chordLenMatch[0].length : 0);
+          col += 1 + chordCloseIdx + afterStrumLen + lenCharsUsed;
           continue;
         } else {
           errors.push({

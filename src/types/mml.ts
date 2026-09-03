@@ -8,6 +8,11 @@ export interface NoteEvent {
   channel: number;     // 1 - 16
   instrument?: number; // GM音色番号 (0-127)
   isChord?: boolean;   // 和音の一部か
+  isStrum?: boolean;   // バラシ (ギターストローク・ロール) 演奏か
+  strumDirection?: 'down' | 'up'; // ストローク方向 ('down': 低音→高音, 'up': 高音→低音)
+  strumDelaySec?: number; // 1音あたりのディレイ時間 (秒、デフォルト約 0.035秒)
+  strumOrder?: number; // 和音内での発音順序 (0, 1, 2, ...)
+  strumTotal?: number; // 和音内の総音数
   gateRate?: number;   // ゲートタイム率 (0.0 - 1.0)
   gateDuration?: number; // 4分音符基準の実際の発音長
   originalPitch?: string; // 移調前のオリジナル音名 (例: "C4")

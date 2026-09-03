@@ -230,6 +230,68 @@ describe('MML Parser', () => {
       expect(result.globalKeyShift).toBe(-1);
     });
   });
+
+  describe('和音のバラシ (ギターストローク・ジャララーン) 演奏機能', () => {
+    it('[~ceg]4 でダウンストローク (低音→高音) のバラシ情報が付与されること', () => {
+      const code = '[~ceg]4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+
+      // 構成音すべてに isStrum が付与され、ダウンストロークであること
+      expect(notes[0].isStrum).toBe(true);
+      expect(notes[0].strumDirection).toBe('down');
+      expect(notes[0].strumOrder).toBe(0); // C4 (最低音)
+      expect(notes[0].strumTotal).toBe(3);
+
+      expect(notes[1].isStrum).toBe(true);
+      expect(notes[1].strumDirection).toBe('down');
+      expect(notes[1].strumOrder).toBe(1); // E4
+
+      expect(notes[2].isStrum).toBe(true);
+      expect(notes[2].strumDirection).toBe('down');
+      expect(notes[2].strumOrder).toBe(2); // G4 (最高音)
+    });
+
+    it('[~^ceg]4 でアップストローク (高音→低音) のバラシ情報が付与されること', () => {
+      const code = '[~^ceg]4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+
+      expect(notes[0].isStrum).toBe(true);
+      expect(notes[0].strumDirection).toBe('up');
+      // 高音から順に order が付与されていること
+      const gNote = notes.find((n) => n.pitch === 'G4');
+      const cNote = notes.find((n) => n.pitch === 'C4');
+      expect(gNote?.strumOrder).toBe(0); // G4が最初
+      expect(cNote?.strumOrder).toBe(2); // C4が最後
+    });
+
+    it('[ceg]~4 や [ceg]4~ でもバラシとして正しくパースできること', () => {
+      const code1 = '[ceg]~4';
+      const res1 = parseMML(code1);
+      expect(res1.errors).toHaveLength(0);
+      expect(res1.tracks[0].notes[0].isStrum).toBe(true);
+
+      const code2 = '[ceg]4~';
+      const res2 = parseMML(code2);
+      expect(res2.errors).toHaveLength(0);
+      expect(res2.tracks[0].notes[0].isStrum).toBe(true);
+    });
+
+    it('[~16ceg]4 や [~64ceg]4 で速度が正しく反映されること', () => {
+      const slow = parseMML('[~16ceg]4');
+      expect(slow.tracks[0].notes[0].strumDelaySec).toBe(0.07);
+
+      const fast = parseMML('[~64ceg]4');
+      expect(fast.tracks[0].notes[0].strumDelaySec).toBe(0.018);
+    });
+  });
 });
 
 

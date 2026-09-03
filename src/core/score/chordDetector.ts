@@ -324,7 +324,9 @@ export function buildChordMml(
   chordType: string,
   durationStr = '4',
   inversion = 0, // 0: 基本形, 1: 第1展開形, 2: 第2展開形, 3: 第3展開形
-  bass?: string
+  bass?: string,
+  isStrum = false,
+  strumDirection: 'down' | 'up' = 'down'
 ): string {
   const rootPc = getPitchClass(`${root}4`);
   const typeDef = COMMON_CHORD_TYPES.find((d) => d.type === chordType) || COMMON_CHORD_TYPES[0];
@@ -374,5 +376,6 @@ export function buildChordMml(
     noteStrs.push('>'.repeat(-curOctOffset));
   }
 
-  return `[${noteStrs.join('')}]${durationStr}`;
+  const strumPrefix = isStrum ? (strumDirection === 'up' ? '~^' : '~') : '';
+  return `[${strumPrefix}${noteStrs.join('')}]${durationStr}`;
 }

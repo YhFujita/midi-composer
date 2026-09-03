@@ -444,10 +444,15 @@ export class AudioEngine {
 
         // 指定位置より先のノートのみスケジュール
         if (noteEndSec > startOffsetSec) {
-          const audioStartTime = now + (noteStartSec - startOffsetSec);
+          const strumOffsetSec = (note.isStrum && note.strumOrder)
+            ? note.strumOrder * (note.strumDelaySec || 0.035)
+            : 0;
+          const audioStartTime = now + (noteStartSec - startOffsetSec) + strumOffsetSec;
+          const effectiveDurSec = Math.max(0.02, noteDurSec - strumOffsetSec);
+
           if (audioStartTime >= now) {
             const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-            const node = this.scheduleNote(ctx, note, inst, audioStartTime, noteDurSec, masterGain);
+            const node = this.scheduleNote(ctx, note, inst, audioStartTime, effectiveDurSec, masterGain);
             this.activeNodes.push(node);
           }
         }
@@ -623,16 +628,25 @@ export class AudioEngine {
   }
 
   /**
-   * 指定したMIDIノート群のコードプレビュー演奏（アルペジオ風に重ねて鳴らす）
+   * 指定したMIDIノート群のコードプレビュー演奏（通常同時発音 または バラシ演奏）
    */
-  public previewChord(midiNotes: number[], instrument = 0) {
+  public previewChord(
+    midiNotes: number[],
+    instrument = 0,
+    isStrum = true,
+    strumDirection: 'down' | 'up' = 'down'
+  ) {
     const ctx = this.initAudioContext();
     const now = ctx.currentTime;
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.45, now);
     masterGain.connect(ctx.destination);
 
-    const sorted = [...midiNotes].sort((a, b) => a - b);
+    // 方向に応じた並び替え
+    const sorted = [...midiNotes].sort((a, b) =>
+      strumDirection === 'down' ? a - b : b - a
+    );
+
     sorted.forEach((midi, idx) => {
       const dummyNote: NoteEvent = {
         pitch: '',
@@ -643,7 +657,8 @@ export class AudioEngine {
         trackId: 0,
         channel: 1,
       };
-      const offset = idx * 0.05;
+      // isStrum が有効な場合は約40ms間隔のストローク、無効な場合は完全同時
+      const offset = isStrum ? idx * 0.04 : 0;
       const dur = 1.2 - offset;
       this.scheduleNote(ctx, dummyNote, instrument, now + offset, Math.max(0.4, dur), masterGain);
     });

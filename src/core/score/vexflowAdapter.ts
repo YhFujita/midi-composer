@@ -8,6 +8,7 @@ import {
   Beam,
   Renderer,
   StaveConnector,
+  Stroke,
 } from 'vexflow';
 import { ParsedScore, Track, NoteEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
@@ -202,6 +203,16 @@ function createVexNotesForMeasure(
       accidentals.forEach(({ index, acc }) => {
         staveNote.addModifier(new Accidental(acc), index);
       });
+
+      // バラシ (ギターストローク・アルペジオ) 波線記号の付与
+      if (noteGroup.some((n) => n.isStrum)) {
+        const strumNote = noteGroup.find((n) => n.isStrum);
+        const strokeType =
+          strumNote?.strumDirection === 'up'
+            ? Stroke.Type.ROLL_UP
+            : Stroke.Type.ROLL_DOWN;
+        staveNote.addStroke(0, new Stroke(strokeType));
+      }
 
       vexNotes.push(staveNote);
     } catch {

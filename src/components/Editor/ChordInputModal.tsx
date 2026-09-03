@@ -158,6 +158,10 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
   const [progressionText, setProgressionText] = useState<string>('C G Am F');
   const [progressionDuration, setProgressionDuration] = useState<string>('1');
 
+  // バラシ (ギターストローク / ロール) 設定
+  const [isStrumEnabled, setIsStrumEnabled] = useState<boolean>(false);
+  const [strumDirection, setStrumDirection] = useState<'down' | 'up'>('down');
+
   // 生成されるMMLコード文字列
   const generatedMml = useMemo(() => {
     return buildChordMml(
@@ -165,9 +169,11 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
       builderType,
       builderDuration,
       builderInversion,
-      builderBass || undefined
+      builderBass || undefined,
+      isStrumEnabled,
+      strumDirection
     );
-  }, [builderRoot, builderType, builderDuration, builderInversion, builderBass]);
+  }, [builderRoot, builderType, builderDuration, builderInversion, builderBass, isStrumEnabled, strumDirection]);
 
   // 選択中のコードのMIDIノート配列（プレビュー用）
   const chordMidiNotes = useMemo(() => {
@@ -184,19 +190,24 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
       }
     }
 
-    const notes = intervals.map((int) => baseMidi + int);
+    const midis = intervals.map((int) => baseMidi + int);
     if (builderBass && builderBass !== builderRoot) {
       const bassPc = getPitchClass(`${builderBass}3`);
-      notes.unshift(48 + bassPc); // C3基準
+      midis.unshift(48 + bassPc); // C3基準
     }
-    return notes;
+    return midis;
   }, [builderRoot, builderType, builderInversion, builderBass]);
 
   if (!isOpen) return null;
 
   // プレビュー再生
   const handlePreview = (midis?: number[]) => {
-    audioEngine.previewChord(midis || chordMidiNotes, currentProgram);
+    audioEngine.previewChord(
+      midis || chordMidiNotes,
+      currentProgram,
+      isStrumEnabled,
+      strumDirection
+    );
   };
 
   // ビルダーから挿入
@@ -207,7 +218,15 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
 
   // ダイアトニックコードから即座に挿入
   const handleInsertDiatonic = (root: string, type: string) => {
-    const mml = buildChordMml(root, type, diatonicDuration, 0);
+    const mml = buildChordMml(
+      root,
+      type,
+      diatonicDuration,
+      0,
+      undefined,
+      isStrumEnabled,
+      strumDirection
+    );
     onInsertChord(mml);
 
     // 試聴
@@ -224,19 +243,16 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
 
     const mmlParts: string[] = [];
     for (const token of tokens) {
-      // 例: "C", "Am", "Fmaj7", "G7", "C/E", "F#m7"
       const slashParts = token.split('/');
       const mainChord = slashParts[0];
       const bass = slashParts[1];
 
-      // ルート音とコードタイプを正規表現で分離
       const match = mainChord.match(/^([A-Ga-g][#b]?)(.*)$/);
       if (!match) continue;
 
       const root = match[1].charAt(0).toUpperCase() + match[1].slice(1);
       const rawType = match[2];
 
-      // 最も近いコードタイプをマッチング
       let resolvedType = '';
       const exactType = COMMON_CHORD_TYPES.find((t) => t.type === rawType);
       if (exactType) {
@@ -249,7 +265,15 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
         resolvedType = rawType;
       }
 
-      const mml = buildChordMml(root, resolvedType, progressionDuration, 0, bass);
+      const mml = buildChordMml(
+        root,
+        resolvedType,
+        progressionDuration,
+        0,
+        bass,
+        isStrumEnabled,
+        strumDirection
+      );
       mmlParts.push(mml);
     }
 
@@ -351,6 +375,50 @@ export const ChordInputModal: React.FC<ChordInputModalProps> = ({
             <FileText className="w-3 h-3" />
             <span>進行展開</span>
           </button>
+        </div>
+
+        {/* バラシ (ギターストローク演奏) 設定オプション */}
+        <div className="flex-shrink-0 flex items-center justify-between px-3.5 py-1.5 bg-amber-50/90 border-b border-amber-200/80 text-xs">
+          <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isStrumEnabled}
+              onChange={(e) => setIsStrumEnabled(e.target.checked)}
+              className="rounded border-amber-400 text-amber-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+            />
+            <span className="font-bold text-amber-950 flex items-center gap-1 text-[11px]">
+              🎸 バラシ演奏 <span className="font-normal text-[10px] text-amber-800">(ジャララーン ~)</span>
+            </span>
+          </label>
+
+          {isStrumEnabled && (
+            <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={() => setStrumDirection('down')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                  strumDirection === 'down'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-amber-100'
+                }`}
+                title="低音から高音へ (↓ ダウンストローク)"
+              >
+                ↓ ダウン
+              </button>
+              <button
+                type="button"
+                onClick={() => setStrumDirection('up')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                  strumDirection === 'up'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-amber-100'
+                }`}
+                title="高音から低音へ (↑ アップストローク)"
+              >
+                ↑ アップ
+              </button>
+            </div>
+          )}
         </div>
 
         {/* コンテンツエリア (min-h-0 で内部スクロールを保証) */}
