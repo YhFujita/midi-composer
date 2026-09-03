@@ -22,6 +22,7 @@ interface EditorToolbarProps {
   onOpenChordModal: () => void;
   isChordModalOpen?: boolean;
   onInsertToEditor: (program: number, format: InsertFormatType) => void;
+  onInsertText?: (text: string) => void;
   formatType: InsertFormatType;
   onChangeFormatType: (format: InsertFormatType) => void;
 }
@@ -33,6 +34,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onOpenChordModal,
   isChordModalOpen,
   onInsertToEditor,
+  onInsertText,
   formatType,
   onChangeFormatType,
 }) => {
@@ -123,6 +125,41 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
           )}
         </button>
+
+        {/* 移調コマンドクイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置に移調コマンドを挿入 (曲の途中での転調に便利)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                移調を挿入...
+              </option>
+              <optgroup label="パート移調 (トラック別)">
+                <option value="Key(-1) /* 短2度↓ */">Key(-1) /* 短2度下げ(半音↓) */</option>
+                <option value="Key(1) /* 短2度↑ */">Key(1) /* 短2度上げ(半音↑) */</option>
+                <option value="Key(-2) /* 長2度↓ */">Key(-2) /* 長2度下げ(全音↓) */</option>
+                <option value="Key(2) /* 長2度↑ */">Key(2) /* 長2度上げ(全音↑) */</option>
+                <option value="Key(0) /* 原調リセット */">Key(0) /* 原調に戻す */</option>
+              </optgroup>
+              <optgroup label="楽曲全体移調 (マスター)">
+                <option value="MasterKey(-1) /* 全体短2度↓ */">MasterKey(-1) /* 全体短2度下げ */</option>
+                <option value="MasterKey(1) /* 全体短2度↑ */">MasterKey(1) /* 全体短2度上げ */</option>
+                <option value="MasterKey(2) /* 全体長2度↑ */">MasterKey(2) /* 全体長2度上げ */</option>
+                <option value="MasterKey(0) /* 全体原調リセット */">MasterKey(0) /* 全体原調に戻す */</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

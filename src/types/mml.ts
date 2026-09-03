@@ -10,6 +10,8 @@ export interface NoteEvent {
   isChord?: boolean;   // 和音の一部か
   gateRate?: number;   // ゲートタイム率 (0.0 - 1.0)
   gateDuration?: number; // 4分音符基準の実際の発音長
+  originalPitch?: string; // 移調前のオリジナル音名 (例: "C4")
+  keyShift?: number;   // 適用された移調半音数 (例: -1, +2)
   line?: number;       // ソース行番号
   column?: number;     // ソース列番号
 }
@@ -31,6 +33,11 @@ export interface TimeSignatureEvent {
   denominator: number; // 分母 (4/4 の 4)
 }
 
+export interface MasterKeyEvent {
+  time: number;        // 拍数
+  shift: number;       // 移調半音数 (例: -1, +2)
+}
+
 export interface Track {
   id: number;
   name: string;
@@ -41,6 +48,7 @@ export interface Track {
   timeSignatureEvents?: TimeSignatureEvent[];
   initialTempo?: number;
   initialTimeSignature?: { numerator: number; denominator: number };
+  initialKey?: number;
 }
 
 export interface ParseError {
@@ -49,12 +57,18 @@ export interface ParseError {
   column: number;
 }
 
+export interface ParseMMLOptions {
+  globalKeyShift?: number; // UI等から指定される楽曲全体の外部移調オフセット（半音単位）
+}
+
 export interface ParsedScore {
   title?: string;
   tracks: Track[];
   tempoEvents: TempoEvent[];
   timeSignature: { numerator: number; denominator: number };
   totalDuration: number; // 全体の長さ（拍数）
+  masterKeyEvents?: MasterKeyEvent[];
+  globalKeyShift?: number;
   errors: ParseError[];
 }
 

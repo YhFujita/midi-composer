@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Music, Play, Layers } from 'lucide-react';
+import { X, BookOpen, Music, Play, Layers, ArrowUpDown } from 'lucide-react';
 
 interface MmlGuideModalProps {
   isOpen: boolean;
@@ -113,6 +113,27 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
                 <code className="text-amber-900 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-amber-300 inline-block">// 1行コメント / /* 複数行 */ / ; コメント</code>
                 <p className="text-slate-700 mt-1.5 font-medium">コメント記述でメモや小節番号を整理できます</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 移調・キー変更 */}
+          <div>
+            <h3 className="text-sm font-bold text-emerald-800 flex items-center mb-2">
+              <ArrowUpDown className="w-4 h-4 mr-1.5" /> 4. 移調 (キー変更・転調)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Key(-1) / Key(2) / Key(0)</code>
+                <p className="text-slate-700 mt-1.5 font-medium">パート移調 (半音単位)。-1で短2度下げ(半音↓)、+2で長2度上げ(全音↑)。曲の途中でも自由に変更可能です</p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">MasterKey(-1) / MasterKey(1)</code>
+                <p className="text-slate-700 mt-1.5 font-medium">楽曲全体の移調。曲頭または途中で全パートを一括転調します</p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Transpose(n) / _k(n) / 画面上部「移調」ボタン</code>
+                <p className="text-slate-700 mt-1.5 font-medium">互換コマンドに対応。また、エディタツールバーの「移調を挿入」からワンクリックでカーソル位置へ挿入でき、上部バーの「移調 [-] [±0] [+]」からも即座に試聴・キー変更が可能です</p>
               </div>
             </div>
           </div>

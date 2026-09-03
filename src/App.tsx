@@ -43,10 +43,25 @@ export const App: React.FC = () => {
   // ガイドモーダル
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
-  // MML パース処理 (メモ化)
+  // 全体移調 (半音単位, 例: -1 で短2度下げ)
+  const [globalKeyShift, setGlobalKeyShift] = useState<number>(0);
+
+  // MML パース処理 (メモ化: MMLテキストまたは全体移調が変更されたら再計算)
   const parsedScore = useMemo(() => {
-    return parseMML(mmlText);
-  }, [mmlText]);
+    return parseMML(mmlText, { globalKeyShift });
+  }, [mmlText, globalKeyShift]);
+
+  // 全体移調変更ハンドラ (再生中の場合はシームレスに移調後のスコアで継続再生)
+  const handleKeyShiftChange = useCallback(
+    (newShift: number) => {
+      setGlobalKeyShift(newShift);
+      if (isPlaying) {
+        const newScore = parseMML(mmlText, { globalKeyShift: newShift });
+        audioEngine.play(newScore, currentTimeSec);
+      }
+    },
+    [isPlaying, mmlText, currentTimeSec]
+  );
 
   // オーディオコールバック登録
   useEffect(() => {
@@ -105,6 +120,7 @@ export const App: React.FC = () => {
   const handleNew = useCallback(() => {
     if (window.confirm('新しいファイルを作成しますか？未保存の変更は失われます。')) {
       handleStop();
+      setGlobalKeyShift(0);
       setMmlText('// 新規 MML 作成\nTempo(120)\nTimeSignature(4,4)\n\nTR(1) Voice(0) o4 l4\nc d e f g a b > c <\n');
       setCurrentFilename('new_song.mml');
       setFileHandle(null);
@@ -116,6 +132,7 @@ export const App: React.FC = () => {
     try {
       const fileData = await openMmlFile();
       handleStop();
+      setGlobalKeyShift(0);
       setMmlText(fileData.content);
       setCurrentFilename(fileData.filename);
       setFileHandle(fileData.handle);
@@ -186,6 +203,7 @@ export const App: React.FC = () => {
   const handleLoadPreset = useCallback(
     (mml: string) => {
       handleStop();
+      setGlobalKeyShift(0);
       setMmlText(mml);
     },
     [handleStop]
@@ -220,7 +238,7 @@ export const App: React.FC = () => {
         onChangeLayout={handleLayoutChange}
       />
 
-      {/* コントロールバー (再生・停止・エクスポート・ファイル操作) */}
+      {/* コントロールバー (再生・停止・エクスポート・ファイル操作・移調) */}
       <ControlBar
         score={parsedScore}
         isPlaying={isPlaying}
@@ -241,6 +259,8 @@ export const App: React.FC = () => {
         onLoadPreset={handleLoadPreset}
         isExportingMp3={isExportingMp3}
         mp3Progress={mp3Progress}
+        globalKeyShift={globalKeyShift}
+        onChangeGlobalKeyShift={handleKeyShiftChange}
       />
 
       {/* メインエリア: 分割レイアウト (左右分割 または 上下分割) */}

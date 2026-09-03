@@ -11,6 +11,9 @@ import {
   FileAudio,
   Sparkles,
   Loader2,
+  Minus,
+  Plus,
+  RotateCcw,
 } from 'lucide-react';
 import { ParsedScore } from '../../types/mml';
 import { PRESET_SONGS } from '../../constants/presets';
@@ -35,6 +38,8 @@ interface ControlBarProps {
   onLoadPreset: (mml: string) => void;
   isExportingMp3: boolean;
   mp3Progress: number;
+  globalKeyShift?: number;
+  onChangeGlobalKeyShift?: (shift: number) => void;
 }
 
 function formatTime(seconds: number): string {
@@ -42,6 +47,28 @@ function formatTime(seconds: number): string {
   const secs = Math.floor(seconds % 60);
   const millis = Math.floor((seconds % 1) * 10);
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis}`;
+}
+
+export function getKeyIntervalLabel(shift: number): string {
+  if (shift === 0) return '原調 (±0)';
+  const abs = Math.abs(shift);
+  const dir = shift > 0 ? '↑' : '↓';
+  const names: Record<number, string> = {
+    1: '短2度',
+    2: '長2度',
+    3: '短3度',
+    4: '長3度',
+    5: '完全4度',
+    6: '増4度/減5度',
+    7: '完全5度',
+    8: '短6度',
+    9: '長6度',
+    10: '短7度',
+    11: '長7度',
+    12: '1オクターブ',
+  };
+  const name = names[abs] || `${abs}半音`;
+  return `${shift > 0 ? '+' : ''}${shift} (${name}${dir})`;
 }
 
 export const ControlBar: React.FC<ControlBarProps> = ({
@@ -64,6 +91,8 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onLoadPreset,
   isExportingMp3,
   mp3Progress,
+  globalKeyShift = 0,
+  onChangeGlobalKeyShift,
 }) => {
   const [selectedPreset, setSelectedPreset] = useState<string>('');
 
@@ -186,6 +215,59 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           <span className="text-blue-400 font-semibold">{currentBpm} BPM</span>
           <span className="text-slate-600">|</span>
           <span className="text-purple-400">{timeSignatureStr}</span>
+        </div>
+
+        {/* 全体移調 (Key Shift / Transpose) コントロール */}
+        <div
+          className="flex items-center space-x-1 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded-md text-slate-300"
+          title={`楽曲全体の移調（現在: ${getKeyIntervalLabel(globalKeyShift)}）\nクリックで半音上げ下げ、中央をクリックで原調(±0)にリセット`}
+        >
+          <span className="text-[11px] font-semibold text-slate-400 pl-0.5">移調:</span>
+
+          {/* 半音下げるボタン */}
+          <button
+            type="button"
+            onClick={() => onChangeGlobalKeyShift?.(Math.max(-12, globalKeyShift - 1))}
+            disabled={globalKeyShift <= -12}
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 transition-colors"
+            title="半音下げる (短2度↓)"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+
+          {/* 現在の移調値バッジ (クリックで0にリセット) */}
+          <button
+            type="button"
+            onClick={() => onChangeGlobalKeyShift?.(0)}
+            className={`px-1.5 py-0.5 font-mono text-xs font-bold rounded transition-all ${
+              globalKeyShift === 0
+                ? 'text-slate-300 hover:bg-slate-800'
+                : globalKeyShift > 0
+                ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50 hover:bg-blue-600/50'
+                : 'bg-amber-600/30 text-amber-300 border border-amber-500/50 hover:bg-amber-600/50'
+            }`}
+            title="クリックして原調 (±0) にリセット"
+          >
+            {globalKeyShift > 0 ? `+${globalKeyShift}` : globalKeyShift === 0 ? '±0' : `${globalKeyShift}`}
+          </button>
+
+          {/* 半音上げるボタン */}
+          <button
+            type="button"
+            onClick={() => onChangeGlobalKeyShift?.(Math.min(12, globalKeyShift + 1))}
+            disabled={globalKeyShift >= 12}
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 active:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 transition-colors"
+            title="半音上げる (短2度↑)"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+
+          {/* 度数ラベル (移調中のみ表示) */}
+          {globalKeyShift !== 0 && (
+            <span className="text-[10px] font-medium text-amber-400 hidden lg:inline pl-1 pr-0.5">
+              {getKeyIntervalLabel(globalKeyShift).replace(/^[+-]?\d+\s*/, '')}
+            </span>
+          )}
         </div>
       </div>
 

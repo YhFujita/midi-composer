@@ -114,5 +114,122 @@ describe('MML Parser', () => {
     expect(notes[5].pitch).toBe('G4');
     expect(notes[5].gateDuration).toBe(1.0);
   });
+
+  describe('移調 (トランスポーズ) 機能', () => {
+    it('Key(-1) で短2度下がる (半音下げ: C4 -> B3)', () => {
+      const code = 'Key(-1) o4 c4 d4 e4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+      // c4 (MIDI 60) -> 59 (B3)
+      expect(notes[0].midiNote).toBe(59);
+      expect(notes[0].pitch).toBe('B3');
+      expect(notes[0].originalPitch).toBe('C4');
+      expect(notes[0].keyShift).toBe(-1);
+
+      // d4 (MIDI 62) -> 61 (C#4)
+      expect(notes[1].midiNote).toBe(61);
+      expect(notes[1].pitch).toBe('C#4');
+      expect(notes[1].originalPitch).toBe('D4');
+
+      // e4 (MIDI 64) -> 63 (D#4)
+      expect(notes[2].midiNote).toBe(63);
+      expect(notes[2].pitch).toBe('D#4');
+    });
+
+    it('Key(2) で長2度上がる (全音上げ: C4 -> D4)', () => {
+      const code = 'Key(2) o4 c4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const note = result.tracks[0].notes[0];
+      // c4 (MIDI 60) -> 62 (D4)
+      expect(note.midiNote).toBe(62);
+      expect(note.pitch).toBe('D4');
+      expect(note.originalPitch).toBe('C4');
+      expect(note.keyShift).toBe(2);
+    });
+
+    it('曲の途中で Key(n) を変更して転調できること', () => {
+      // 最初の2音は原調(0)、後半2音は短2度下げ(-1)
+      const code = 'o4 c4 d4 Key(-1) c4 d4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      // 前半: 移調なし
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[0].midiNote).toBe(60);
+      expect(notes[1].pitch).toBe('D4');
+      expect(notes[1].midiNote).toBe(62);
+
+      // 後半: 半音下げ (-1)
+      expect(notes[2].pitch).toBe('B3');
+      expect(notes[2].midiNote).toBe(59);
+      expect(notes[3].pitch).toBe('C#4');
+      expect(notes[3].midiNote).toBe(61);
+    });
+
+    it('トラック毎に異なる移調量を指定できること', () => {
+      const code = 'TR(1) Key(0) o4 c4\nTR(2) Key(-1) o4 c4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.tracks).toHaveLength(2);
+      // TR1 は C4 (60)
+      expect(result.tracks[0].notes[0].pitch).toBe('C4');
+      expect(result.tracks[0].notes[0].midiNote).toBe(60);
+
+      // TR2 は B3 (59)
+      expect(result.tracks[1].notes[0].pitch).toBe('B3');
+      expect(result.tracks[1].notes[0].midiNote).toBe(59);
+    });
+
+    it('MasterKey(n) で全トラックに全体移調が適用されること', () => {
+      const code = 'MasterKey(-1)\nTR(1) o4 c4\nTR(2) o4 e4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      // TR1: C4 (60) -> B3 (59)
+      expect(result.tracks[0].notes[0].pitch).toBe('B3');
+      expect(result.tracks[0].notes[0].midiNote).toBe(59);
+      // TR2: E4 (64) -> D#4 (63)
+      expect(result.tracks[1].notes[0].pitch).toBe('D#4');
+      expect(result.tracks[1].notes[0].midiNote).toBe(63);
+    });
+
+    it('和音 [ceg]4 に対しても移調が正しく適用されること', () => {
+      const code = 'Key(-1) [ceg]4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+      // C4 -> B3
+      expect(notes[0].pitch).toBe('B3');
+      expect(notes[0].midiNote).toBe(59);
+      // E4 -> D#4
+      expect(notes[1].pitch).toBe('D#4');
+      expect(notes[1].midiNote).toBe(63);
+      // G4 -> F#4
+      expect(notes[2].pitch).toBe('F#4');
+      expect(notes[2].midiNote).toBe(66);
+    });
+
+    it('オプションの globalKeyShift が全体に移調を加算すること', () => {
+      const code = 'o4 c4';
+      const result = parseMML(code, { globalKeyShift: -1 });
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.tracks[0].notes[0].pitch).toBe('B3');
+      expect(result.tracks[0].notes[0].midiNote).toBe(59);
+      expect(result.globalKeyShift).toBe(-1);
+    });
+  });
 });
+
 

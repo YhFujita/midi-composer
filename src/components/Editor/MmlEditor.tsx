@@ -35,7 +35,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
 
         keywords: [
           'TR', 'TRACK', 'CH', 'CHANNEL', 'VOICE', 'PROGRAM',
-          'TEMPO', 'TIME', 'TIMESIGNATURE', 'OCTAVE', 'LENGTH', 'VOLUME'
+          'TEMPO', 'TIME', 'TIMESIGNATURE', 'OCTAVE', 'LENGTH', 'VOLUME',
+          'KEY', 'TRANSPOSE', 'MASTERKEY', 'MASTERTRANSPOSE'
         ],
 
         tokenizer: {
@@ -300,9 +301,71 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
     editor.focus();
   }, []);
 
+  // 任意のMMLスニペット (移調コマンド等) を現在のカーソル位置に挿入する処理
+  const insertTextAtCursor = useCallback((rawText: string) => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    let selection = editor.getSelection();
+    if (!selection) {
+      const lastLine = model.getLineCount();
+      const lastCol = model.getLineMaxColumn(lastLine);
+      selection = new monacoRef.current.Selection(lastLine, lastCol, lastLine, lastCol);
+    }
+
+    const targetRange = selection;
+    let textToInsert = rawText;
+
+    if (selection.isEmpty()) {
+      const startPos = selection.getStartPosition();
+      const endPos = selection.getEndPosition();
+
+      let prefix = '';
+      if (startPos.column > 1) {
+        const charBefore = model.getValueInRange({
+          startLineNumber: startPos.line,
+          startColumn: startPos.column - 1,
+          endLineNumber: startPos.line,
+          endColumn: startPos.column,
+        });
+        if (charBefore && !/\s/.test(charBefore)) {
+          prefix = ' ';
+        }
+      }
+
+      let suffix = '';
+      const lineMaxCol = model.getLineMaxColumn(endPos.line);
+      if (endPos.column < lineMaxCol) {
+        const charAfter = model.getValueInRange({
+          startLineNumber: endPos.line,
+          startColumn: endPos.column,
+          endLineNumber: endPos.line,
+          endColumn: endPos.column + 1,
+        });
+        if (charAfter && !/\s/.test(charAfter)) {
+          suffix = ' ';
+        }
+      }
+
+      textToInsert = prefix + rawText + suffix;
+    }
+
+    editor.executeEdits('text-insert', [
+      {
+        range: targetRange,
+        text: textToInsert,
+        forceMoveMarkers: true,
+      },
+    ]);
+
+    editor.focus();
+  }, []);
+
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">
-      {/* エディタ上部ツールバー: 楽器選択・コード入力・出力ボタン */}
+      {/* エディタ上部ツールバー: 楽器選択・コード入力・移調挿入・出力ボタン */}
       <EditorToolbar
         selectedProgram={selectedProgram}
         onSelectProgram={setSelectedProgram}
@@ -310,6 +373,7 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
         onOpenChordModal={() => setIsChordModalOpen((prev) => !prev)}
         isChordModalOpen={isChordModalOpen}
         onInsertToEditor={insertInstrumentCode}
+        onInsertText={insertTextAtCursor}
         formatType={formatType}
         onChangeFormatType={setFormatType}
       />

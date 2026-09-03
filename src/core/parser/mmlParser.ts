@@ -1,5 +1,5 @@
-import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent } from '../../types/mml';
-import { pitchToMidi, parseDurationLength } from '../../utils/noteConverter';
+import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, ParseMMLOptions } from '../../types/mml';
+import { pitchToMidi, midiToPitch, parseDurationLength } from '../../utils/noteConverter';
 
 interface TrackState {
   id: number;
@@ -10,18 +10,35 @@ interface TrackState {
   defaultLength: number;
   velocity: number;
   gateRate: number;    // ゲートタイム率 (0.0 - 1.0)
+  keyShift: number;    // トラック個別の移調量 (半音単位, 例: -1, +2)
+  initialKey?: number; // トラック開始時の初期移調量
   currentTime: number; // 4分音符基準の累積時間
   notes: NoteEvent[];
   tempoEvents: TempoEvent[];
   timeSignatureEvents: TimeSignatureEvent[];
 }
 
-export function parseMML(mmlCode: string): ParsedScore {
+export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
   const errors: ParseError[] = [];
   const tracksMap = new Map<number, TrackState>();
   const tempoEvents: TempoEvent[] = [{ time: 0, bpm: 120 }];
   const timeSignatures: TimeSignatureEvent[] = [{ time: 0, numerator: 4, denominator: 4 }];
+  const masterKeyEvents: MasterKeyEvent[] = [{ time: 0, shift: 0 }];
+  const uiGlobalKeyShift = options?.globalKeyShift || 0;
   let scoreTitle: string | undefined;
+
+  // 指定時刻における全体移調量 (MasterKey) を取得
+  function getMasterKeyAt(time: number): number {
+    let shift = 0;
+    for (const ev of masterKeyEvents) {
+      if (time >= ev.time) {
+        shift = ev.shift;
+      } else {
+        break;
+      }
+    }
+    return shift;
+  }
 
   // デフォルトの第1トラック(ID: 0)を初期化
   function getOrCreateTrack(trackId: number): TrackState {
@@ -35,6 +52,7 @@ export function parseMML(mmlCode: string): ParsedScore {
         defaultLength: 4,
         velocity: 100,
         gateRate: 1.0,
+        keyShift: 0,
         currentTime: 0,
         notes: [],
         tempoEvents: [],
@@ -237,6 +255,43 @@ export function parseMML(mmlCode: string): ParsedScore {
         continue;
       }
 
+      // 5.1 全体移調 (MasterKey / MasterTranspose): MasterKey(-1), MasterKey(2), MasterKey = -1, MasterKey-1 等
+      const masterKeyMatch = remaining.match(/^(?:Master(?:Key|Transpose)(?:\s*\(\s*([+-]?\d+)\s*\)|(?:\s*=\s*|\s*)([+-]?\d+)))/i);
+      if (masterKeyMatch) {
+        const rawStr = masterKeyMatch[1] ?? masterKeyMatch[2];
+        const shiftVal = parseInt(rawStr, 10);
+        if (!isNaN(shiftVal)) {
+          // 同一時刻のイベントがあれば上書き、なければ追加
+          const existing = masterKeyEvents.find((ev) => ev.time === currentTrack.currentTime);
+          if (existing) {
+            existing.shift = shiftVal;
+          } else {
+            masterKeyEvents.push({
+              time: currentTrack.currentTime,
+              shift: shiftVal,
+            });
+            masterKeyEvents.sort((a, b) => a.time - b.time);
+          }
+        }
+        col += masterKeyMatch[0].length;
+        continue;
+      }
+
+      // 5.2 トラック移調 (Key / Transpose / _k): Key(-1), Key(2), Key = -1, Key-1, Transpose(-1), _k(-1) 等
+      const keyMatch = remaining.match(/^(?:(?:Key|Transpose)(?:\s*\(\s*([+-]?\d+)\s*\)|(?:\s*=\s*|\s*)([+-]?\d+))|_k(?:\s*\(\s*([+-]?\d+)\s*\)|(?:\s*=\s*|\s*)([+-]?\d+)))/i);
+      if (keyMatch) {
+        const rawStr = keyMatch[1] ?? keyMatch[2] ?? keyMatch[3] ?? keyMatch[4];
+        const shiftVal = parseInt(rawStr, 10);
+        if (!isNaN(shiftVal)) {
+          currentTrack.keyShift = shiftVal;
+          if (currentTrack.initialKey === undefined && currentTrack.currentTime === 0) {
+            currentTrack.initialKey = shiftVal;
+          }
+        }
+        col += keyMatch[0].length;
+        continue;
+      }
+
       // 6. デフォルト音長: l4, l8, l16, Length(4)
       const lenMatch = remaining.match(/^(?:l\s*(\d+\.?)|LENGTH\(?=?\s*(\d+\.?)\)?)/i);
       if (lenMatch) {
@@ -331,11 +386,17 @@ export function parseMML(mmlCode: string): ParsedScore {
               if (acc === '_') acc = '-';
 
               const fullPitch = `${pitchLetter}${acc}${chordOctave}`;
-              const midiVal = pitchToMidi(fullPitch);
+              const baseMidi = pitchToMidi(fullPitch);
+              const masterShift = getMasterKeyAt(currentTrack.currentTime);
+              const totalShift = currentTrack.keyShift + masterShift + uiGlobalKeyShift;
+              const transposedMidi = Math.max(0, Math.min(127, baseMidi + totalShift));
+              const finalPitch = midiToPitch(transposedMidi);
 
               currentTrack.notes.push({
-                pitch: fullPitch,
-                midiNote: midiVal,
+                pitch: finalPitch,
+                midiNote: transposedMidi,
+                originalPitch: fullPitch,
+                keyShift: totalShift,
                 startTime: currentTrack.currentTime,
                 duration: chordDuration,
                 velocity: currentTrack.velocity,
@@ -391,11 +452,17 @@ export function parseMML(mmlCode: string): ParsedScore {
         const noteLenStr = singleNoteMatch[3];
         const duration = parseDurationLength(noteLenStr, currentTrack.defaultLength);
         const fullPitch = `${noteLetter}${accidental}${currentTrack.octave}`;
-        const midiVal = pitchToMidi(fullPitch);
+        const baseMidi = pitchToMidi(fullPitch);
+        const masterShift = getMasterKeyAt(currentTrack.currentTime);
+        const totalShift = currentTrack.keyShift + masterShift + uiGlobalKeyShift;
+        const transposedMidi = Math.max(0, Math.min(127, baseMidi + totalShift));
+        const finalPitch = midiToPitch(transposedMidi);
 
         currentTrack.notes.push({
-          pitch: fullPitch,
-          midiNote: midiVal,
+          pitch: finalPitch,
+          midiNote: transposedMidi,
+          originalPitch: fullPitch,
+          keyShift: totalShift,
           startTime: currentTrack.currentTime,
           duration: duration,
           velocity: currentTrack.velocity,
@@ -439,6 +506,7 @@ export function parseMML(mmlCode: string): ParsedScore {
       initialTimeSignature: sortedTimeSig[0]
         ? { numerator: sortedTimeSig[0].numerator, denominator: sortedTimeSig[0].denominator }
         : undefined,
+      initialKey: ts.initialKey ?? ts.keyShift,
     };
   });
 
@@ -464,6 +532,8 @@ export function parseMML(mmlCode: string): ParsedScore {
       denominator: activeTimeSig.denominator,
     },
     totalDuration: maxDuration,
+    masterKeyEvents: masterKeyEvents.sort((a, b) => a.time - b.time),
+    globalKeyShift: uiGlobalKeyShift,
     errors,
   };
 }
