@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Header, LayoutOrientation } from './components/Layout/Header';
 import { ControlBar } from './components/Transport/ControlBar';
-import { MmlEditor } from './components/Editor/MmlEditor';
+import { MmlEditor, CursorPosition } from './components/Editor/MmlEditor';
 import { SheetMusic } from './components/Score/SheetMusic';
 import { MmlGuideModal } from './components/Editor/MmlGuideModal';
-import { parseMML } from './core/parser/mmlParser';
+import { parseMML, findBeatAtCursor } from './core/parser/mmlParser';
 import { generateMidiBlob } from './core/midi/midiGenerator';
 import { audioEngine } from './core/audio/soundFontPlayer';
 import { exportToMp3 } from './core/audio/mp3Exporter';
@@ -17,6 +17,9 @@ export const App: React.FC = () => {
   const [mmlText, setMmlText] = useState<string>(PRESET_SONGS[0].mml);
   const [currentFilename, setCurrentFilename] = useState<string>('twinkle_star.mml');
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
+
+  // エディタのテキストカーソル位置
+  const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ lineNumber: 1, column: 1 });
 
   // レイアウト分割方向 ('horizontal': 左右分割, 'vertical': 上下分割)
   const [layoutOrientation, setLayoutOrientation] = useState<LayoutOrientation>(() => {
@@ -78,7 +81,39 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // 再生
+  // カーソル位置に対応する再生秒数
+  const cursorPlaybackSec = useMemo(() => {
+    const beat = findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
+    return audioEngine.calculateBeatToSec(parsedScore, beat);
+  }, [parsedScore, cursorPosition]);
+
+  // 最初から再生
+  const handlePlayFromStart = useCallback(() => {
+    const totalNotes = parsedScore.tracks.reduce((sum, tr) => sum + tr.notes.length, 0);
+    if (totalNotes === 0) {
+      alert('再生できる有効な音符がありません。MMLエディタを確認してください。');
+      return;
+    }
+    audioEngine.play(parsedScore, 0);
+    setIsPlaying(true);
+    setIsPaused(false);
+  }, [parsedScore]);
+
+  // 途中から再生 (テキストカーソルの位置から再生)
+  const handlePlayFromCursor = useCallback(() => {
+    const totalNotes = parsedScore.tracks.reduce((sum, tr) => sum + tr.notes.length, 0);
+    if (totalNotes === 0) {
+      alert('再生できる有効な音符がありません。MMLエディタを確認してください。');
+      return;
+    }
+    const beat = findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
+    const sec = audioEngine.calculateBeatToSec(parsedScore, beat);
+    audioEngine.play(parsedScore, sec);
+    setIsPlaying(true);
+    setIsPaused(false);
+  }, [parsedScore, cursorPosition]);
+
+  // 再開 (一時停止位置から)
   const handlePlay = useCallback(() => {
     const totalNotes = parsedScore.tracks.reduce((sum, tr) => sum + tr.notes.length, 0);
     if (totalNotes === 0) {
@@ -247,6 +282,10 @@ export const App: React.FC = () => {
         totalDurationSec={totalDurationSec}
         currentFilename={currentFilename}
         onPlay={handlePlay}
+        onPlayFromStart={handlePlayFromStart}
+        onPlayFromCursor={handlePlayFromCursor}
+        cursorPlaybackTimeSec={cursorPlaybackSec}
+        cursorLineNumber={cursorPosition.lineNumber}
         onPause={handlePause}
         onStop={handleStop}
         onSeek={handleSeek}
@@ -282,10 +321,11 @@ export const App: React.FC = () => {
               value={mmlText}
               onChange={handleMmlChange}
               errors={parsedScore.errors}
+              onCursorChange={setCursorPosition}
             />
           </div>
 
-          {/* フッター: エラー・パース状態バー */}
+          {/* フッター: エラー・パース状態バー & カーソル位置 */}
           <div className="px-3 py-1.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs">
             {parsedScore.errors.length > 0 ? (
               <div className="flex items-center space-x-1.5 text-rose-400">
@@ -300,7 +340,11 @@ export const App: React.FC = () => {
                 <span>MML 構文正常 ({parsedScore.tracks.length} トラック, 総拍数: {parsedScore.totalDuration.toFixed(1)})</span>
               </div>
             )}
-            <span className="text-slate-500 font-mono text-[11px]">UTF-8</span>
+            <div className="flex items-center space-x-3 text-slate-400 font-mono text-[11px]">
+              <span>行 {cursorPosition.lineNumber}, 列 {cursorPosition.column}</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-500">UTF-8</span>
+            </div>
           </div>
         </div>
 

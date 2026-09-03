@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMML } from './mmlParser';
+import { parseMML, findBeatAtCursor } from './mmlParser';
 import { PRESET_SONGS } from '../../constants/presets';
 
 describe('MML Parser', () => {
@@ -292,6 +292,176 @@ describe('MML Parser', () => {
       expect(fast.tracks[0].notes[0].strumDelaySec).toBe(0.018);
     });
   });
+
+  describe('ペダル (ダンパー / サステイン) 機能', () => {
+    it('Pedal 〜 PedalOff でアルペジオ各音に hasPedal と pedalReleaseTime が付与されること', () => {
+      // 8分音符4つのアルペジオ (総時間 2.0拍)
+      const code = 'l8 Pedal c e g > c PedalOff';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      // すべてのノートが hasPedal === true で、ペダル解放時刻が 2.0拍 であること
+      notes.forEach((note) => {
+        expect(note.hasPedal).toBe(true);
+        expect(note.pedalReleaseTime).toBe(2.0);
+      });
+
+      // 開始時間はそれぞれ 0, 0.5, 1.0, 1.5
+      expect(notes[0].startTime).toBe(0);
+      expect(notes[1].startTime).toBe(0.5);
+      expect(notes[2].startTime).toBe(1.0);
+      expect(notes[3].startTime).toBe(1.5);
+
+      // pedalEvents が ON と OFF の2件記録されていること
+      expect(result.tracks[0].pedalEvents).toBeDefined();
+      expect(result.tracks[0].pedalEvents).toHaveLength(2);
+      expect(result.tracks[0].pedalEvents![0]).toEqual({
+        time: 0,
+        type: 'on',
+        trackId: 0,
+        channel: 1,
+      });
+      expect(result.tracks[0].pedalEvents![1]).toEqual({
+        time: 2.0,
+        type: 'off',
+        trackId: 0,
+        channel: 1,
+      });
+    });
+
+    it('ペダル区間外の音符には pedalReleaseTime が付与されないこと', () => {
+      const code = 'c4 Pedal d4 e4 PedalOff f4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      // c4 (ペダル前)
+      expect(notes[0].hasPedal).toBeUndefined();
+      expect(notes[0].pedalReleaseTime).toBeUndefined();
+
+      // d4, e4 (ペダル中: ペダル離下時刻は 3.0拍)
+      expect(notes[1].hasPedal).toBe(true);
+      expect(notes[1].pedalReleaseTime).toBe(3.0);
+      expect(notes[2].hasPedal).toBe(true);
+      expect(notes[2].pedalReleaseTime).toBe(3.0);
+
+      // f4 (ペダル後)
+      expect(notes[3].hasPedal).toBeUndefined();
+      expect(notes[3].pedalReleaseTime).toBeUndefined();
+    });
+
+    it('短縮記法 P1 / P0 および Pedal(1) / Pedal(0) が正しく動作すること', () => {
+      const code1 = 'P1 c4 d4 P0';
+      const res1 = parseMML(code1);
+      expect(res1.errors).toHaveLength(0);
+      expect(res1.tracks[0].notes[0].hasPedal).toBe(true);
+      expect(res1.tracks[0].notes[0].pedalReleaseTime).toBe(2.0);
+
+      const code2 = 'Pedal(1) c4 d4 Pedal(0)';
+      const res2 = parseMML(code2);
+      expect(res2.errors).toHaveLength(0);
+      expect(res2.tracks[0].notes[0].hasPedal).toBe(true);
+      expect(res2.tracks[0].notes[0].pedalReleaseTime).toBe(2.0);
+
+      const code3 = '_P c4 d4 _p';
+      const res3 = parseMML(code3);
+      expect(res3.errors).toHaveLength(0);
+      expect(res3.tracks[0].notes[0].hasPedal).toBe(true);
+      expect(res3.tracks[0].notes[0].pedalReleaseTime).toBe(2.0);
+    });
+
+    it('ペダルがOFFにならず曲末尾に達した場合、末尾時刻で自動解放されること', () => {
+      const code = 'Pedal c4 d4';
+      const result = parseMML(code);
+
+      expect(result.errors).toHaveLength(0);
+      const notes = result.tracks[0].notes;
+      expect(notes[0].pedalReleaseTime).toBe(2.0);
+      expect(notes[1].pedalReleaseTime).toBe(2.0);
+      expect(result.totalDuration).toBe(2.0);
+    });
+  });
+
+  describe('findBeatAtCursor (カーソル位置からの再生拍数導出)', () => {
+    it('音符の直上または直前にある場合、その音符の開始拍が返ること', () => {
+      // 1行目: "c4 d4 e4 f4"
+      // c4: col 1..2 (beat 0)
+      // d4: col 4..5 (beat 1)
+      // e4: col 7..8 (beat 2)
+      // f4: col 10..11 (beat 3)
+      const code = 'c4 d4 e4 f4';
+      const score = parseMML(code);
+
+      // c4の上 (line 1, col 1) -> beat 0
+      expect(findBeatAtCursor(score.timelineItems, 1, 1)).toBe(0);
+      // d4の上 (line 1, col 4) -> beat 1
+      expect(findBeatAtCursor(score.timelineItems, 1, 4)).toBe(1.0);
+      // e4の上 (line 1, col 7) -> beat 2
+      expect(findBeatAtCursor(score.timelineItems, 1, 7)).toBe(2.0);
+      // f4の上 (line 1, col 10) -> beat 3
+      expect(findBeatAtCursor(score.timelineItems, 1, 10)).toBe(3.0);
+    });
+
+    it('小節線や空白などの区切り上にある場合、後続の音符の開始拍が返ること', () => {
+      const code = 'c4 d4 | e4 f4';
+      const score = parseMML(code);
+
+      // | の上 (line 1, col 7) -> 次の音符 e4 (col 9, beat 2)
+      expect(findBeatAtCursor(score.timelineItems, 1, 7)).toBe(2.0);
+      // c4 と d4 の間のスペース (line 1, col 3) -> 次の音符 d4 (beat 1)
+      expect(findBeatAtCursor(score.timelineItems, 1, 3)).toBe(1.0);
+    });
+
+    it('行末にカーソルがある場合、次の行の先頭音符の開始拍が返ること', () => {
+      const code = 'c4 d4\ne4 f4';
+      const score = parseMML(code);
+
+      // 1行目の行末 (line 1, col 10) -> 2行目の e4 (beat 2)
+      expect(findBeatAtCursor(score.timelineItems, 1, 10)).toBe(2.0);
+    });
+
+    it('コメント行や空行、トラック宣言行にある場合、後続行の先頭音符が返ること', () => {
+      const code = '// コメント\n\nTR(1) o4 l4\nc d e f';
+      const score = parseMML(code);
+
+      // 1行目 (コメント) -> c (beat 0)
+      expect(findBeatAtCursor(score.timelineItems, 1, 1)).toBe(0);
+      // 2行目 (空行) -> c (beat 0)
+      expect(findBeatAtCursor(score.timelineItems, 2, 1)).toBe(0);
+      // 3行目 (TR(1)) -> TR(1) の beat 0
+      expect(findBeatAtCursor(score.timelineItems, 3, 1)).toBe(0);
+    });
+
+    it('和音 [ceg]4 や休符 r4 の位置も正確に反映されること', () => {
+      const code = 'c4 r4 [ceg]4 d4';
+      const score = parseMML(code);
+
+      // c4 (beat 0)
+      expect(findBeatAtCursor(score.timelineItems, 1, 1)).toBe(0);
+      // r4 (line 1, col 4) -> 休符 (beat 1.0)
+      expect(findBeatAtCursor(score.timelineItems, 1, 4)).toBe(1.0);
+      // [ceg]4 の中 (line 1, col 8) -> 和音 (beat 2.0)
+      expect(findBeatAtCursor(score.timelineItems, 1, 8)).toBe(2.0);
+      // d4 (line 1, col 14) -> beat 3.0
+      expect(findBeatAtCursor(score.timelineItems, 1, 14)).toBe(3.0);
+    });
+
+    it('複数トラックにおいてトラック2の行にカーソルがある場合、そのトラックの拍数が返ること', () => {
+      const code = 'TR(1) o4 l4\nc d e f\n\nTR(2) o4 l4\ng a b > c';
+      const score = parseMML(code);
+
+      // トラック2の1音目 g (5行目 col 1) -> beat 0
+      expect(findBeatAtCursor(score.timelineItems, 5, 1)).toBe(0);
+      // トラック2の3音目 b (5行目 col 5) -> beat 2
+      expect(findBeatAtCursor(score.timelineItems, 5, 5)).toBe(2.0);
+    });
+  });
 });
+
 
 

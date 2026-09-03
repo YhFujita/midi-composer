@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Music, Play, Layers, ArrowUpDown } from 'lucide-react';
+import { X, BookOpen, Music, Play, Layers, ArrowUpDown, Disc } from 'lucide-react';
 
 interface MmlGuideModalProps {
   isOpen: boolean;
@@ -140,6 +140,33 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
                 <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Transpose(n) / _k(n) / 画面上部「移調」ボタン</code>
                 <p className="text-slate-700 mt-1.5 font-medium">互換コマンドに対応。また、エディタツールバーの「移調を挿入」からワンクリックでカーソル位置へ挿入でき、上部バーの「移調 [-] [±0] [+]」からも即座に試聴・キー変更が可能です</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ペダル機能 (サステイン / ダンパーペダル) */}
+          <div>
+            <h3 className="text-sm font-bold text-sky-800 flex items-center mb-2">
+              <Disc className="w-4 h-4 mr-1.5" /> 5. ペダル機能 (サステイン / ダンパーペダル)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-sky-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-sky-300 inline-block">Pedal / P1 / Pedal(1) / _P</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>ペダルを踏む (ON)</strong>: ダンパーを解放します。離す記号を書くまでは、その後で他の音を弾いても前の音も鳴り続けます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-sky-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-sky-300 inline-block">PedalOff / P0 / Pedal(0) / _p</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>ペダルを離す (OFF)</strong>: ダンパーを戻します。ペダルによって伸びていた音が一斉に自然な余韻で消音します。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-sky-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-sky-300 inline-block">Pedal c8 e8 g8 &gt; c8 &lt; g e c4 PedalOff</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🎹 <strong>アルペジオ演奏の響き</strong>: 分散和音を弾く際にペダルを踏むと、音が途切れずに重なり合って本物のピアノのような豊かな響きになります。五線譜上にも <code>Ped.</code> と <code>✱</code> の記号が表示され、MIDI書き出し時にも標準規格の <strong>CC#64 (Sustain)</strong> として出力されます。エディタ上部の「ペダルを挿入」からもワンクリックで入力できます。
+                </p>
               </div>
             </div>
           </div>

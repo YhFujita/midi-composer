@@ -9,8 +9,9 @@ import {
   Renderer,
   StaveConnector,
   Stroke,
+  Annotation,
 } from 'vexflow';
-import { ParsedScore, Track, NoteEvent } from '../../types/mml';
+import { ParsedScore, Track, NoteEvent, PedalEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 
 import { detectChordsForMeasure, ChordDetectionGranularity } from './chordDetector';
@@ -125,7 +126,8 @@ function createVexNotesForMeasure(
   notes: NoteEvent[],
   measureIndex: number,
   beatsPerMeasure: number,
-  clef: string
+  clef: string,
+  pedalEvents?: PedalEvent[]
 ): StaveNote[] {
   const vexNotes: StaveNote[] = [];
   const measureStartBeat = measureIndex * beatsPerMeasure;
@@ -170,6 +172,22 @@ function createVexNotesForMeasure(
       if (rDot) {
         Dot.buildAndAttach([restNote], { all: true });
       }
+
+      // 休符のタイミングにペダルOFFがあれば ✱ を付与
+      if (pedalEvents && pedalEvents.length > 0) {
+        const hasPedalOff = pedalEvents.some(
+          (p) => p.type === 'off' && Math.abs(p.time - (measureStartBeat + currentBeatInMeasure)) < 0.05
+        );
+        if (hasPedalOff) {
+          try {
+            const relAnn = new Annotation('✱').setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
+            restNote.addModifier(relAnn, 0);
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       vexNotes.push(restNote);
       currentBeatInMeasure += gap;
     }
@@ -212,6 +230,30 @@ function createVexNotesForMeasure(
             ? Stroke.Type.ROLL_UP
             : Stroke.Type.ROLL_DOWN;
         staveNote.addStroke(0, new Stroke(strokeType));
+      }
+
+      // ペダル記号 (Ped. / ✱) の付与
+      if (pedalEvents && pedalEvents.length > 0) {
+        const noteAbsoluteStart = measureStartBeat + t;
+        const noteAbsoluteEnd = noteAbsoluteStart + firstNote.duration;
+
+        const hasPedalOn = pedalEvents.some(
+          (p) => p.type === 'on' && Math.abs(p.time - noteAbsoluteStart) < 0.05
+        );
+        const hasPedalOff = pedalEvents.some(
+          (p) => p.type === 'off' && Math.abs(p.time - noteAbsoluteStart) < 0.05
+        );
+        const hasPedalOffAtEnd = pedalEvents.some(
+          (p) => p.type === 'off' && Math.abs(p.time - noteAbsoluteEnd) < 0.05
+        );
+
+        if (hasPedalOn) {
+          const pedAnn = new Annotation('Ped.').setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
+          staveNote.addModifier(pedAnn, 0);
+        } else if (hasPedalOff || hasPedalOffAtEnd) {
+          const relAnn = new Annotation('✱').setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
+          staveNote.addModifier(relAnn, 0);
+        }
       }
 
       vexNotes.push(staveNote);
@@ -405,7 +447,8 @@ export function renderScoreToSvg(
         mGroup.notes,
         mGroup.measureIndex,
         beatsPerMeasure,
-        defaultClef
+        defaultClef,
+        track.pedalEvents
       );
 
       if (vexNotes.length > 0) {
@@ -662,7 +705,7 @@ export function renderFullScoreToSvg(
 
         // 音符生成
         const notes = trackMeasureMaps[tIdx].get(mIdx) || [];
-        const vexNotes = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef);
+        const vexNotes = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
 
         if (vexNotes.length > 0) {
           try {

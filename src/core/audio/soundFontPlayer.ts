@@ -94,6 +94,14 @@ export class AudioEngine {
   }
 
   /**
+   * 指定した楽譜における拍数 (beat) を秒数 (sec) に変換
+   */
+  public calculateBeatToSec(score: ParsedScore, beat: number): number {
+    this.buildTempoMap(score);
+    return this.beatToSec(beat);
+  }
+
+  /**
    * 秒数 (sec) を 拍数 (beat) に変換
    */
   public secToBeat(sec: number): number {
@@ -438,8 +446,12 @@ export class AudioEngine {
     score.tracks.forEach((track) => {
       track.notes.forEach((note) => {
         const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        let effectiveEndBeat = note.startTime + noteDur;
+        if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
+          effectiveEndBeat = note.pedalReleaseTime;
+        }
         const noteStartSec = this.beatToSec(note.startTime);
-        const noteEndSec = this.beatToSec(note.startTime + noteDur);
+        const noteEndSec = this.beatToSec(effectiveEndBeat);
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         // 指定位置より先のノートのみスケジュール
@@ -584,8 +596,12 @@ export class AudioEngine {
     score.tracks.forEach((track) => {
       track.notes.forEach((note) => {
         const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        let effectiveEndBeat = note.startTime + noteDur;
+        if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
+          effectiveEndBeat = note.pedalReleaseTime;
+        }
         const noteStartSec = this.beatToSec(note.startTime);
-        const noteEndSec = this.beatToSec(note.startTime + noteDur);
+        const noteEndSec = this.beatToSec(effectiveEndBeat);
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         const inst = note.instrument !== undefined ? note.instrument : track.instrument;

@@ -19,6 +19,15 @@ export interface NoteEvent {
   keyShift?: number;   // 適用された移調半音数 (例: -1, +2)
   line?: number;       // ソース行番号
   column?: number;     // ソース列番号
+  hasPedal?: boolean;  // ペダルが有効な区間に発音されたか
+  pedalReleaseTime?: number; // ペダルが離される拍数 (離されるまで持続)
+}
+
+export interface PedalEvent {
+  time: number;        // 拍数
+  type: 'on' | 'off';  // 'on': 踏む, 'off': 離す
+  trackId: number;     // トラックID
+  channel: number;     // MIDIチャンネル (1-16)
 }
 
 export interface RestEvent {
@@ -54,6 +63,7 @@ export interface Track {
   initialTempo?: number;
   initialTimeSignature?: { numerator: number; denominator: number };
   initialKey?: number;
+  pedalEvents?: PedalEvent[];
 }
 
 export interface ParseError {
@@ -66,6 +76,15 @@ export interface ParseMMLOptions {
   globalKeyShift?: number; // UI等から指定される楽曲全体の外部移調オフセット（半音単位）
 }
 
+export interface MmlTimelineItem {
+  line: number;        // ソースコード行番号 (1-indexed)
+  startColumn: number; // 開始列番号 (1-indexed)
+  endColumn: number;   // 終了列番号 (1-indexed)
+  trackId: number;     // トラックID
+  beat: number;        // 4分音符基準の開始拍数
+  type: 'note' | 'rest' | 'track';
+}
+
 export interface ParsedScore {
   title?: string;
   tracks: Track[];
@@ -74,6 +93,8 @@ export interface ParsedScore {
   totalDuration: number; // 全体の長さ（拍数）
   masterKeyEvents?: MasterKeyEvent[];
   globalKeyShift?: number;
+  pedalEvents?: PedalEvent[];
+  timelineItems?: MmlTimelineItem[];
   errors: ParseError[];
 }
 

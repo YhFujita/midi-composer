@@ -6,13 +6,19 @@ import { InstrumentSelectorModal, InsertFormatType } from './InstrumentSelectorM
 import { ChordInputModal } from './ChordInputModal';
 import { getInstrumentByProgram } from '../../constants/instruments';
 
+export interface CursorPosition {
+  lineNumber: number;
+  column: number;
+}
+
 interface MmlEditorProps {
   value: string;
   onChange: (value: string) => void;
   errors: ParseError[];
+  onCursorChange?: (position: CursorPosition) => void;
 }
 
-export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors }) => {
+export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors, onCursorChange }) => {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
 
@@ -36,7 +42,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
         keywords: [
           'TR', 'TRACK', 'CH', 'CHANNEL', 'VOICE', 'PROGRAM',
           'TEMPO', 'TIME', 'TIMESIGNATURE', 'OCTAVE', 'LENGTH', 'VOLUME',
-          'KEY', 'TRANSPOSE', 'MASTERKEY', 'MASTERTRANSPOSE'
+          'KEY', 'TRANSPOSE', 'MASTERKEY', 'MASTERTRANSPOSE',
+          'PEDAL', 'PEDALOFF'
         ],
 
         tokenizer: {
@@ -45,6 +52,9 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
             [/\/\/.*$/, 'comment'],
             [/;.*$/, 'comment'],
             [/\/\*/, 'comment', '@comment'],
+
+            // ペダルコマンド (Pedal, PedalOff, P1, P0, _P, _p)
+            [/(?:PedalOff|Pedal|P1|P0|_P|_p)\b/i, 'keyword'],
 
             // コマンドキーワード (TR, Voice, Tempo 等)
             [/[a-zA-Z]+\b(?=\s*[\(=])/, {
@@ -110,6 +120,19 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({ value, onChange, errors })
     editorRef.current = editor;
     monacoRef.current = monaco;
     updateErrorMarkers();
+
+    // 初期のカーソル位置を通知
+    const pos = editor.getPosition();
+    if (pos && onCursorChange) {
+      onCursorChange({ lineNumber: pos.lineNumber, column: pos.column });
+    }
+
+    // カーソル位置の変更を監視
+    editor.onDidChangeCursorPosition((e: any) => {
+      if (onCursorChange && e.position) {
+        onCursorChange({ lineNumber: e.position.lineNumber, column: e.position.column });
+      }
+    });
   };
 
   // パースエラーの波線マーカー更新

@@ -25,7 +25,11 @@ interface ControlBarProps {
   currentTimeSec: number;
   totalDurationSec: number;
   currentFilename: string;
-  onPlay: () => void;
+  onPlay?: () => void;
+  onPlayFromStart: () => void;
+  onPlayFromCursor: () => void;
+  cursorPlaybackTimeSec?: number;
+  cursorLineNumber?: number;
   onPause: () => void;
   onStop: () => void;
   onSeek: (sec: number) => void;
@@ -79,6 +83,10 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   totalDurationSec,
   currentFilename,
   onPlay,
+  onPlayFromStart,
+  onPlayFromCursor,
+  cursorPlaybackTimeSec,
+  cursorLineNumber,
   onPause,
   onStop,
   onSeek,
@@ -161,28 +169,54 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 
       {/* 中央エリア: 再生トランスポートコントロール */}
       <div className="flex items-center space-x-3 w-full md:w-auto justify-center">
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-1.5">
+          {/* 最初から再生 */}
+          <button
+            onClick={onPlayFromStart}
+            className="flex items-center space-x-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-medium transition-all active:scale-95 shadow-sm shadow-blue-900/30"
+            title="曲の最初から再生 (00:00)"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>最初から</span>
+          </button>
+
+          {/* 途中から再生（テキストカーソル位置から） */}
+          <button
+            onClick={onPlayFromCursor}
+            className="flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-medium transition-all active:scale-95 shadow-sm shadow-emerald-900/30"
+            title={`テキストカーソルの位置から再生${
+              cursorLineNumber !== undefined
+                ? ` (行 ${cursorLineNumber}${cursorPlaybackTimeSec !== undefined ? ` : ${formatTime(cursorPlaybackTimeSec)}` : ''})`
+                : ''
+            }`}
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>途中から</span>
+          </button>
+
+          {/* 一時停止 / 再開ボタン */}
           {isPlaying ? (
             <button
               onClick={onPause}
-              className="p-2 bg-amber-600 hover:bg-amber-500 text-white rounded-full transition-transform active:scale-95 shadow-md shadow-amber-900/30"
+              className="p-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-md transition-all active:scale-95 shadow-sm shadow-amber-900/30"
               title="一時停止"
             >
               <Pause className="w-4 h-4 fill-current" />
             </button>
-          ) : (
+          ) : isPaused ? (
             <button
               onClick={onPlay}
-              className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-full transition-transform active:scale-95 shadow-md shadow-blue-900/30"
-              title="プレビュー再生"
+              className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-all active:scale-95 shadow-sm shadow-blue-900/30"
+              title="一時停止位置から再開"
             >
               <Play className="w-4 h-4 fill-current ml-0.5" />
             </button>
-          )}
+          ) : null}
 
+          {/* 停止 */}
           <button
             onClick={onStop}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full transition-colors"
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md transition-colors"
             title="停止"
           >
             <Square className="w-4 h-4 fill-current" />

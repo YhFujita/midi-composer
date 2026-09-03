@@ -146,6 +146,18 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       });
     });
 
+    // ペダル (CC#64: Hold 1 / Sustain) イベント
+    if (track.pedalEvents && track.pedalEvents.length > 0) {
+      track.pedalEvents.forEach((p) => {
+        const tick = Math.round(p.time * PPQ);
+        const val = p.type === 'on' ? 127 : 0;
+        trackEvents.push({
+          tick,
+          bytes: [0xb0 | channel, 0x40, val], // CC#64 (Sustain Pedal)
+        });
+      });
+    }
+
     trackChunks.push(buildTrackChunk(trackEvents, PPQ));
   });
 
@@ -182,10 +194,20 @@ export function generateMidiBlob(score: ParsedScore): Blob {
  * イベント配列をデルタタイム形式の MTrk チャンクにビルド
  */
 function buildTrackChunk(events: RawMidiEvent[], ppq: number): Uint8Array {
-  // Tick順にソート (同じTickの場合はNoteOffをNoteOnより優先)
+  // Tick順にソート (同じTickの場合は Meta/ProgChange -> NoteOff -> ControlChange -> NoteOn の順)
+  function getEventPriority(bytes: number[]): number {
+    if (bytes[0] === 0xff) return 0; // Meta event
+    const status = bytes[0] & 0xf0;
+    if (status === 0xc0) return 1;  // Program Change
+    if (status === 0x80) return 2;  // Note Off
+    if (status === 0xb0) return 3;  // Control Change (Pedal ON/OFF等)
+    if (status === 0x90) return 4;  // Note On
+    return 5;
+  }
+
   events.sort((a, b) => {
     if (a.tick !== b.tick) return a.tick - b.tick;
-    return a.bytes[0] - b.bytes[0];
+    return getEventPriority(a.bytes) - getEventPriority(b.bytes);
   });
 
   const trackDataBytes: number[] = [];

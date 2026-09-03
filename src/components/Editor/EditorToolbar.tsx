@@ -160,6 +160,31 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </select>
           </div>
         )}
+
+        {/* ペダル記号クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置にペダル記号を挿入 (音を伸ばして重ねる)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                ペダルを挿入...
+              </option>
+              <option value="Pedal /* 踏む */">Pedal /* 踏む (離すまで音が持続) */</option>
+              <option value="PedalOff /* 離す */">PedalOff /* 離す (ペダル音を消音) */</option>
+              <option value="Pedal c8 e8 g8 > c8 PedalOff">Pedal c8 e8 g8 &gt; c8 PedalOff (アルペジオ例)</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

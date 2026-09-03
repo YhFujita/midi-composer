@@ -1,4 +1,4 @@
-import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, ParseMMLOptions } from '../../types/mml';
+import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem } from '../../types/mml';
 import { pitchToMidi, midiToPitch, parseDurationLength } from '../../utils/noteConverter';
 
 interface TrackState {
@@ -16,11 +16,15 @@ interface TrackState {
   notes: NoteEvent[];
   tempoEvents: TempoEvent[];
   timeSignatureEvents: TimeSignatureEvent[];
+  isPedalOn: boolean;
+  pedalEvents: PedalEvent[];
+  activePedalNotes: NoteEvent[];
 }
 
 export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
   const errors: ParseError[] = [];
   const tracksMap = new Map<number, TrackState>();
+  const timelineItems: MmlTimelineItem[] = [];
   const tempoEvents: TempoEvent[] = [{ time: 0, bpm: 120 }];
   const timeSignatures: TimeSignatureEvent[] = [{ time: 0, numerator: 4, denominator: 4 }];
   const masterKeyEvents: MasterKeyEvent[] = [{ time: 0, shift: 0 }];
@@ -57,6 +61,9 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         notes: [],
         tempoEvents: [],
         timeSignatureEvents: [],
+        isPedalOn: false,
+        pedalEvents: [],
+        activePedalNotes: [],
       });
     }
     return tracksMap.get(trackId)!;
@@ -188,6 +195,42 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
+      // 0.55 ペダル (サステイン / ダンパーペダル)
+      // ペダルOFF (離す): PedalOff, Pedal(off), Pedal(0), P(off), P(0), P0, _P*, または小文字 _p
+      const pedalOffMatch = remaining.match(/^(?:PedalOff|Pedal\s*\(\s*(?:off|0)\s*\)|P\s*\(\s*(?:off|0)\s*\)|P0\b|_P\*)/i)
+        || remaining.match(/^(_p\b)/);
+      if (pedalOffMatch) {
+        currentTrack.isPedalOn = false;
+        currentTrack.pedalEvents.push({
+          time: currentTrack.currentTime,
+          type: 'off',
+          trackId: currentTrack.id,
+          channel: currentTrack.channel,
+        });
+        currentTrack.activePedalNotes.forEach((n) => {
+          n.pedalReleaseTime = currentTrack.currentTime;
+        });
+        currentTrack.activePedalNotes = [];
+        col += pedalOffMatch[0].length;
+        continue;
+      }
+
+      // ペダルON (踏む): Pedal, Pedal(on), Pedal(1), Pedal(), P(on), P(1), P1, _P
+      const pedalOnMatch = remaining.match(/^(?:Pedal(?:\s*\(\s*(?:on|1|127)?\s*\))?|P\s*\(\s*(?:on|1|127)\s*\)|P1\b|_P\b)/i);
+      if (pedalOnMatch) {
+        if (!currentTrack.isPedalOn) {
+          currentTrack.isPedalOn = true;
+          currentTrack.pedalEvents.push({
+            time: currentTrack.currentTime,
+            type: 'on',
+            trackId: currentTrack.id,
+            channel: currentTrack.channel,
+          });
+        }
+        col += pedalOnMatch[0].length;
+        continue;
+      }
+
       // 0.6 パン・モジュレーション (p64, Pan(64), m0)
       const panModMatch = remaining.match(/^(?:(?:PAN|MOD)\(?=?\s*\d+\)?|[pm]\s*\d+)/i);
       if (panModMatch) {
@@ -201,6 +244,14 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         const rawTrNum = parseInt(trackMatch[1], 10);
         currentTrackId = rawTrNum > 0 ? rawTrNum - 1 : 0;
         currentTrack = getOrCreateTrack(currentTrackId);
+        timelineItems.push({
+          line: lineNumber,
+          startColumn: col + 1,
+          endColumn: col + trackMatch[0].length,
+          trackId: currentTrack.id,
+          beat: currentTrack.currentTime,
+          type: 'track',
+        });
         col += trackMatch[0].length;
         continue;
       }
@@ -502,11 +553,27 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               });
             }
 
-            chordNotes.forEach((n) => currentTrack.notes.push(n));
+            chordNotes.forEach((n) => {
+              if (currentTrack.isPedalOn) {
+                n.hasPedal = true;
+                currentTrack.activePedalNotes.push(n);
+              }
+              currentTrack.notes.push(n);
+            });
           }
 
+          const chordTokenLen = 1 + chordCloseIdx + afterStrumLen + lenCharsUsed;
+          timelineItems.push({
+            line: lineNumber,
+            startColumn: col + 1,
+            endColumn: col + chordTokenLen,
+            trackId: currentTrack.id,
+            beat: currentTrack.currentTime,
+            type: 'note',
+          });
+
           currentTrack.currentTime += chordDuration;
-          col += 1 + chordCloseIdx + afterStrumLen + lenCharsUsed;
+          col += chordTokenLen;
           continue;
         } else {
           errors.push({
@@ -524,6 +591,14 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       if (restMatch) {
         const restLenStr = restMatch[1];
         const duration = parseDurationLength(restLenStr, currentTrack.defaultLength);
+        timelineItems.push({
+          line: lineNumber,
+          startColumn: col + 1,
+          endColumn: col + restMatch[0].length,
+          trackId: currentTrack.id,
+          beat: currentTrack.currentTime,
+          type: 'rest',
+        });
         currentTrack.currentTime += duration;
         col += restMatch[0].length;
         continue;
@@ -546,7 +621,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         const transposedMidi = Math.max(0, Math.min(127, baseMidi + totalShift));
         const finalPitch = midiToPitch(transposedMidi);
 
-        currentTrack.notes.push({
+        const singleNote: NoteEvent = {
           pitch: finalPitch,
           midiNote: transposedMidi,
           originalPitch: fullPitch,
@@ -561,6 +636,22 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           instrument: currentTrack.instrument,
           line: lineNumber,
           column: col + 1,
+        };
+
+        if (currentTrack.isPedalOn) {
+          singleNote.hasPedal = true;
+          currentTrack.activePedalNotes.push(singleNote);
+        }
+
+        currentTrack.notes.push(singleNote);
+
+        timelineItems.push({
+          line: lineNumber,
+          startColumn: col + 1,
+          endColumn: col + singleNoteMatch[0].length,
+          trackId: currentTrack.id,
+          beat: currentTrack.currentTime,
+          type: 'note',
         });
 
         currentTrack.currentTime += duration;
@@ -578,6 +669,29 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     }
   }
 
+  // パース終了時に未解放のペダルがあれば、トラックの現在時刻でOFFにする
+  tracksMap.forEach((ts) => {
+    if (ts.isPedalOn) {
+      ts.activePedalNotes.forEach((n) => {
+        n.pedalReleaseTime = ts.currentTime;
+      });
+      ts.pedalEvents.push({
+        time: ts.currentTime,
+        type: 'off',
+        trackId: ts.id,
+        channel: ts.channel,
+      });
+      ts.isPedalOn = false;
+      ts.activePedalNotes = [];
+    }
+  });
+
+  // 全トラックのペダルイベント統合リスト
+  const allPedalEvents: PedalEvent[] = [];
+  tracksMap.forEach((ts) => {
+    allPedalEvents.push(...ts.pedalEvents);
+  });
+
   // トラックリストの整形
   const tracks: Track[] = Array.from(tracksMap.values()).map((ts) => {
     const sortedTempo = ts.tempoEvents.sort((a, b) => a.time - b.time);
@@ -590,6 +704,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       notes: ts.notes.sort((a, b) => a.startTime - b.startTime),
       tempoEvents: sortedTempo,
       timeSignatureEvents: sortedTimeSig,
+      pedalEvents: ts.pedalEvents.sort((a, b) => a.time - b.time),
       initialTempo: sortedTempo[0]?.bpm,
       initialTimeSignature: sortedTimeSig[0]
         ? { numerator: sortedTimeSig[0].numerator, denominator: sortedTimeSig[0].denominator }
@@ -598,11 +713,11 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     };
   });
 
-  // 全体の総拍数
+  // 全体の総拍数 (ペダルで持続する音符の長さも考慮)
   let maxDuration = 0;
   for (const tr of tracks) {
     for (const note of tr.notes) {
-      const end = note.startTime + note.duration;
+      const end = Math.max(note.startTime + note.duration, note.pedalReleaseTime ?? 0);
       if (end > maxDuration) {
         maxDuration = end;
       }
@@ -622,6 +737,63 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     totalDuration: maxDuration,
     masterKeyEvents: masterKeyEvents.sort((a, b) => a.time - b.time),
     globalKeyShift: uiGlobalKeyShift,
+    pedalEvents: allPedalEvents.sort((a, b) => a.time - b.time),
+    timelineItems,
     errors,
   };
 }
+
+/**
+ * テキストエディタ上のカーソル位置 (行, 列) から最適な再生開始拍数 (beat) を導出する
+ * @param timelineItems MMLパース時に記録された音符・休符・トラックのタイムライン情報
+ * @param cursorLine 1-indexed 行番号
+ * @param cursorColumn 1-indexed 列番号
+ */
+export function findBeatAtCursor(
+  timelineItems: MmlTimelineItem[] | undefined,
+  cursorLine: number,
+  cursorColumn: number
+): number {
+  if (!timelineItems || timelineItems.length === 0) return 0;
+
+  // 1. カーソルがアイテムの範囲内にあるか (line一致 かつ startColumn <= cursorColumn <= endColumn)
+  const exactItem = timelineItems.find(
+    (item) => item.line === cursorLine && cursorColumn >= item.startColumn && cursorColumn <= item.endColumn
+  );
+  if (exactItem) {
+    return exactItem.beat;
+  }
+
+  // 2. カーソル行に存在するアイテム
+  const sameLineItems = timelineItems.filter((item) => item.line === cursorLine);
+  if (sameLineItems.length > 0) {
+    // カーソルより右側（前方）にある最初のアイテム
+    const nextItemOnLine = sameLineItems.find((item) => item.startColumn >= cursorColumn);
+    if (nextItemOnLine) {
+      return nextItemOnLine.beat;
+    }
+    // カーソルが行末（右側にアイテムがない）の場合:
+    // 次の行以降にアイテムがあればその最初のアイテム、なければ同一行の最後のアイテム
+    const futureItems = timelineItems.filter((item) => item.line > cursorLine);
+    if (futureItems.length > 0) {
+      return futureItems[0].beat;
+    }
+    return sameLineItems[sameLineItems.length - 1].beat;
+  }
+
+  // 3. カーソル行にアイテムがない場合（空行、コメント行、トラック定義行など）
+  // 後続行の最初のアイテム
+  const futureItems = timelineItems.filter((item) => item.line > cursorLine);
+  if (futureItems.length > 0) {
+    return futureItems[0].beat;
+  }
+
+  // 先行行の最後のアイテム
+  const pastItems = timelineItems.filter((item) => item.line < cursorLine);
+  if (pastItems.length > 0) {
+    return pastItems[pastItems.length - 1].beat;
+  }
+
+  return 0;
+}
+
