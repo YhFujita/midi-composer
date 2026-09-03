@@ -10,6 +10,9 @@ import {
   StaveConnector,
   Stroke,
   Annotation,
+  StaveTie,
+  Curve,
+  CurvePosition,
 } from 'vexflow';
 import { ParsedScore, Track, NoteEvent, PedalEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
@@ -28,6 +31,7 @@ export interface ScoreDisplayOptions {
   showChords: boolean;         // コードネームを表示するか
   chordGranularity: ChordDetectionGranularity; // 'measure' | 'two-beats' | 'beat' | 'auto'
   chordTrackSource: 'all' | 'selected';       // 総譜時のコード解析対象
+  showTiesAndSlurs?: boolean;  // タイ・スラーの記号を描画するか
 }
 
 export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
@@ -39,6 +43,7 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   showChords: true,
   chordGranularity: 'auto',
   chordTrackSource: 'all',
+  showTiesAndSlurs: true,
 };
 
 /**
@@ -119,8 +124,19 @@ export function groupNotesByMeasure(
   return groups;
 }
 
+export interface VexMeasureItem {
+  staveNote: StaveNote;
+  noteEvents: NoteEvent[];
+  isRest: boolean;
+}
+
+export interface VexMeasureOutput {
+  notes: StaveNote[];
+  items: VexMeasureItem[];
+}
+
 /**
- * 1小節分の音符リストから VexFlow の StaveNote 配列を生成
+ * 1小節分の音符リストから VexFlow の StaveNote 配列およびマッピング情報を生成
  */
 function createVexNotesForMeasure(
   notes: NoteEvent[],
@@ -128,8 +144,9 @@ function createVexNotesForMeasure(
   beatsPerMeasure: number,
   clef: string,
   pedalEvents?: PedalEvent[]
-): StaveNote[] {
+): VexMeasureOutput {
   const vexNotes: StaveNote[] = [];
+  const items: VexMeasureItem[] = [];
   const measureStartBeat = measureIndex * beatsPerMeasure;
   let currentBeatInMeasure = 0;
 
@@ -144,7 +161,8 @@ function createVexNotesForMeasure(
     if (rDot) {
       Dot.buildAndAttach([restNote], { all: true });
     }
-    return [restNote];
+    items.push({ staveNote: restNote, noteEvents: [], isRest: true });
+    return { notes: [restNote], items };
   }
 
   // 同じ startTime の音符を和音としてまとめる
@@ -189,6 +207,7 @@ function createVexNotesForMeasure(
       }
 
       vexNotes.push(restNote);
+      items.push({ staveNote: restNote, noteEvents: [], isRest: true });
       currentBeatInMeasure += gap;
     }
 
@@ -257,14 +276,15 @@ function createVexNotesForMeasure(
       }
 
       vexNotes.push(staveNote);
+      items.push({ staveNote, noteEvents: noteGroup, isRest: false });
     } catch {
-      vexNotes.push(
-        new StaveNote({
-          clef,
-          keys: [clef === 'bass' ? 'd/3' : 'b/4'],
-          duration: 'qr',
-        })
-      );
+      const fallbackRest = new StaveNote({
+        clef,
+        keys: [clef === 'bass' ? 'd/3' : 'b/4'],
+        duration: 'qr',
+      });
+      vexNotes.push(fallbackRest);
+      items.push({ staveNote: fallbackRest, noteEvents: [], isRest: true });
     }
 
     currentBeatInMeasure = t + firstNote.duration;
@@ -283,9 +303,159 @@ function createVexNotesForMeasure(
       Dot.buildAndAttach([restNote], { all: true });
     }
     vexNotes.push(restNote);
+    items.push({ staveNote: restNote, noteEvents: [], isRest: true });
   }
 
-  return vexNotes;
+  return { notes: vexNotes, items };
+}
+
+/**
+ * 1小節内のタイ（Tie）およびスラー（Slur）記号を描画する
+ */
+function renderTiesAndSlursForMeasure(ctx: any, items: VexMeasureItem[]) {
+  // 1. タイ（同一音高の連結）の描画
+  items.forEach((item, itemIdx) => {
+    if (item.isRest || !item.noteEvents || item.noteEvents.length === 0) return;
+
+    item.noteEvents.forEach((ne, kIdx) => {
+      // 次の音符へ繋がるタイ
+      if (ne.hasTieToNext) {
+        // 同一小節内の次の音符を探す
+        let nextItem: VexMeasureItem | undefined;
+        let nextKeyIdx = 0;
+        for (let j = itemIdx + 1; j < items.length; j++) {
+          const candidate = items[j];
+          if (candidate.isRest) continue;
+          const matchIdx = candidate.noteEvents.findIndex(
+            (cn) => cn.hasTieFromPrev && cn.midiNote === ne.midiNote
+          );
+          if (matchIdx !== -1) {
+            nextItem = candidate;
+            nextKeyIdx = matchIdx;
+            break;
+          }
+        }
+
+        if (nextItem) {
+          // 同一小節内タイ
+          try {
+            const tie = new StaveTie({
+              firstNote: item.staveNote,
+              lastNote: nextItem.staveNote,
+              firstIndexes: [kIdx],
+              lastIndexes: [nextKeyIdx],
+            });
+            tie.setContext(ctx).draw();
+          } catch {
+            // ignore
+          }
+        } else {
+          // 小節跨ぎタイ（次小節へ向かうタイ）
+          try {
+            const tie = new StaveTie({
+              firstNote: item.staveNote,
+              lastNote: null,
+              firstIndexes: [kIdx],
+            });
+            tie.setContext(ctx).draw();
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // 前の小節から受けるタイ（同一小節内に先行音がない場合）
+      if (ne.hasTieFromPrev) {
+        let hasPrevInMeasure = false;
+        for (let j = 0; j < itemIdx; j++) {
+          const candidate = items[j];
+          if (!candidate.isRest && candidate.noteEvents.some((pn) => pn.hasTieToNext && pn.midiNote === ne.midiNote)) {
+            hasPrevInMeasure = true;
+            break;
+          }
+        }
+        if (!hasPrevInMeasure) {
+          try {
+            const tie = new StaveTie({
+              firstNote: null,
+              lastNote: item.staveNote,
+              lastIndexes: [kIdx],
+            });
+            tie.setContext(ctx).draw();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    });
+  });
+
+  // 2. スラー（レガート曲線）の描画
+  const slurGroups = new Map<number, VexMeasureItem[]>();
+  items.forEach((item) => {
+    if (item.isRest || !item.noteEvents || item.noteEvents.length === 0) return;
+    const sId = item.noteEvents[0].slurGroupId;
+    if (sId !== undefined) {
+      if (!slurGroups.has(sId)) {
+        slurGroups.set(sId, []);
+      }
+      slurGroups.get(sId)!.push(item);
+    }
+  });
+
+  slurGroups.forEach((groupItems) => {
+    if (groupItems.length >= 2) {
+      const first = groupItems[0];
+      const last = groupItems[groupItems.length - 1];
+      try {
+        const curve = new Curve(first.staveNote, last.staveNote, {
+          position: CurvePosition.NEAR_TOP,
+          thickness: 1.8,
+        });
+        curve.setContext(ctx).draw();
+      } catch {
+        try {
+          const tie = new StaveTie({
+            firstNote: first.staveNote,
+            lastNote: last.staveNote,
+            firstIndexes: [0],
+            lastIndexes: [0],
+          });
+          tie.setContext(ctx).draw();
+        } catch {
+          // ignore
+        }
+      }
+    } else if (groupItems.length === 1) {
+      // 1小節に1音のみのスラー端点（小節跨ぎスラー）
+      const single = groupItems[0];
+      const isStart = single.noteEvents.some((n) => n.isSlurStart);
+      const isEnd = single.noteEvents.some((n) => n.isSlurEnd);
+      if (isStart) {
+        try {
+          const tie = new StaveTie({
+            firstNote: single.staveNote,
+            lastNote: null,
+            firstIndexes: [0],
+          });
+          tie.setContext(ctx).draw();
+        } catch {
+          // ignore
+        }
+      } else if (isEnd) {
+        try {
+          const tie = new StaveTie({
+            firstNote: null,
+            lastNote: single.staveNote,
+            lastIndexes: [0],
+          });
+          tie.setContext(ctx).draw();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  });
 }
 
 /** トラックの平均音高から Clef (ト音/ヘ音) を判定 */
@@ -443,7 +613,7 @@ export function renderScoreToSvg(
         }
       }
 
-      const vexNotes = createVexNotesForMeasure(
+      const { notes: vexNotes, items: measureItems } = createVexNotesForMeasure(
         mGroup.notes,
         mGroup.measureIndex,
         beatsPerMeasure,
@@ -472,6 +642,11 @@ export function renderScoreToSvg(
 
           voice.draw(ctx, stave);
           beams.forEach((b) => b.setContext(ctx).draw());
+
+          // タイおよびスラーの描画
+          if (options.showTiesAndSlurs !== false) {
+            renderTiesAndSlursForMeasure(ctx, measureItems);
+          }
         } catch {
           // ignore
         }
@@ -705,7 +880,7 @@ export function renderFullScoreToSvg(
 
         // 音符生成
         const notes = trackMeasureMaps[tIdx].get(mIdx) || [];
-        const vexNotes = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
+        const { notes: vexNotes, items: measureItems } = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
 
         if (vexNotes.length > 0) {
           try {
@@ -728,6 +903,11 @@ export function renderFullScoreToSvg(
 
             voice.draw(ctx, stave);
             beams.forEach((b) => b.setContext(ctx).draw());
+
+            // タイおよびスラーの描画
+            if (options.showTiesAndSlurs !== false) {
+              renderTiesAndSlursForMeasure(ctx, measureItems);
+            }
           } catch {
             // ignore
           }

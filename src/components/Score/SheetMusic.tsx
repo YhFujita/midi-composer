@@ -368,6 +368,17 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                     />
                   </label>
 
+                  {/* タイ・スラー表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
+                    <span className="text-slate-800 font-medium">タイ・スラーの記号を表示</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showTiesAndSlurs !== false}
+                      onChange={(e) => updateDisplayOption('showTiesAndSlurs', e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
                   {/* コードネーム表示 */}
                   <div className="border-t border-slate-200 pt-2 mt-1 space-y-2">
                     <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">

@@ -19,6 +19,13 @@ interface TrackState {
   isPedalOn: boolean;
   pedalEvents: PedalEvent[];
   activePedalNotes: NoteEvent[];
+  pendingTieOrSlur: boolean; // 直前の音符から '&' または '^' で繋がるフラグ
+  lastNoteGroup: NoteEvent[] | null; // 直前の音符群 (単音または和音)
+  inExplicitSlur: boolean; // Slur(...) や SlurOn によるスラーモード中か
+  explicitSlurParenDepth: number; // Slur(...) のカッコ深さ
+  currentExplicitSlurId?: number; // 現在のスラーグループID
+  explicitSlurNotes: NoteEvent[]; // 明示的スラーに属する音符リスト
+  currentSlurGroupCount: number; // スラーグループ採番カウンタ
 }
 
 export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
@@ -64,9 +71,95 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         isPedalOn: false,
         pedalEvents: [],
         activePedalNotes: [],
+        pendingTieOrSlur: false,
+        lastNoteGroup: null,
+        inExplicitSlur: false,
+        explicitSlurParenDepth: 0,
+        explicitSlurNotes: [],
+        currentSlurGroupCount: 0,
       });
     }
     return tracksMap.get(trackId)!;
+  }
+
+  // 音符群をトラックへ登録（タイ・スラーの接続およびペダル適用）
+  function registerNotesToTrack(
+    track: TrackState,
+    notes: NoteEvent[],
+    hasTrailingTieOrSlur: boolean
+  ) {
+    // 1. 直前の音符からのタイ・スラー接続チェック
+    if (track.pendingTieOrSlur && track.lastNoteGroup && track.lastNoteGroup.length > 0) {
+      const prev = track.lastNoteGroup;
+      // 同一音高判定 (単音または和音構成音がすべて一致)
+      const isSamePitch =
+        prev.length === notes.length &&
+        prev.every((pn, idx) => pn.midiNote === notes[idx].midiNote);
+
+      if (isSamePitch) {
+        // タイ (Tie) として結合
+        prev.forEach((pn) => {
+          pn.hasTieToNext = true;
+        });
+        notes.forEach((cn) => {
+          cn.hasTieFromPrev = true;
+        });
+      } else {
+        // 異なる音高 -> スラー (Slur) として結合
+        const prevSlurId = prev[0].slurGroupId;
+        const slurId = prevSlurId !== undefined ? prevSlurId : ++track.currentSlurGroupCount;
+        if (prevSlurId === undefined) {
+          prev.forEach((pn) => {
+            pn.slurGroupId = slurId;
+            pn.isSlurStart = true;
+            pn.gateRate = 1.0;
+            pn.gateDuration = pn.duration;
+          });
+        }
+        notes.forEach((cn) => {
+          cn.slurGroupId = slurId;
+          cn.gateRate = 1.0;
+          cn.gateDuration = cn.duration;
+        });
+        // 以前の終了フラグをクリアし、現在の音に終了フラグを設定
+        prev.forEach((pn) => {
+          pn.isSlurEnd = false;
+        });
+        notes.forEach((cn) => {
+          cn.isSlurEnd = true;
+        });
+      }
+      track.pendingTieOrSlur = false;
+    }
+
+    // 2. 明示的スラーモード (SlurOn や Slur(...) ) の適用
+    if (track.inExplicitSlur && track.currentExplicitSlurId !== undefined) {
+      notes.forEach((cn) => {
+        cn.slurGroupId = track.currentExplicitSlurId;
+        cn.gateRate = 1.0;
+        cn.gateDuration = cn.duration;
+      });
+      if (track.explicitSlurNotes.length === 0) {
+        notes.forEach((cn) => (cn.isSlurStart = true));
+      } else {
+        // 前の音の isSlurEnd を解除
+        track.explicitSlurNotes.forEach((pn) => (pn.isSlurEnd = false));
+      }
+      notes.forEach((cn) => (cn.isSlurEnd = true));
+      track.explicitSlurNotes.push(...notes);
+    }
+
+    // ペダル処理 & ノート追加
+    notes.forEach((n) => {
+      if (track.isPedalOn) {
+        n.hasPedal = true;
+        track.activePedalNotes.push(n);
+      }
+      track.notes.push(n);
+    });
+
+    track.lastNoteGroup = notes;
+    track.pendingTieOrSlur = hasTrailingTieOrSlur;
   }
 
   let currentTrackId = 0;
@@ -140,6 +233,44 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       // 0. 小節線 | やカンマ , などの区切り記号をスキップ
       if (char === '|' || char === ',') {
         col++;
+        continue;
+      }
+
+      // 0.01 タイ・スラー接続記号 (& または ^) が単独で現れた場合
+      if (char === '&' || char === '^') {
+        if (currentTrack.lastNoteGroup && currentTrack.lastNoteGroup.length > 0) {
+          currentTrack.pendingTieOrSlur = true;
+        }
+        col++;
+        continue;
+      }
+
+      // 0.05 スラー開始: Slur( ... )
+      const slurCallMatch = remaining.match(/^Slur\s*\(/i);
+      if (slurCallMatch) {
+        currentTrack.inExplicitSlur = true;
+        currentTrack.explicitSlurParenDepth = (currentTrack.explicitSlurParenDepth || 0) + 1;
+        currentTrack.currentExplicitSlurId = ++currentTrack.currentSlurGroupCount;
+        currentTrack.explicitSlurNotes = [];
+        col += slurCallMatch[0].length;
+        continue;
+      }
+
+      // 0.06 スラー区間コマンド: SlurOn / SlurOff
+      const slurOnMatch = remaining.match(/^(?:SlurOn|Slur_On|_slur\b)/i);
+      if (slurOnMatch) {
+        currentTrack.inExplicitSlur = true;
+        currentTrack.currentExplicitSlurId = ++currentTrack.currentSlurGroupCount;
+        currentTrack.explicitSlurNotes = [];
+        col += slurOnMatch[0].length;
+        continue;
+      }
+
+      const slurOffMatch = remaining.match(/^(?:SlurOff|Slur_Off|_slur\*)/i);
+      if (slurOffMatch) {
+        currentTrack.inExplicitSlur = false;
+        currentTrack.explicitSlurNotes = [];
+        col += slurOffMatch[0].length;
         continue;
       }
 
@@ -392,6 +523,15 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
       if (char === ')') {
+        if (currentTrack.explicitSlurParenDepth > 0) {
+          currentTrack.explicitSlurParenDepth--;
+          if (currentTrack.explicitSlurParenDepth === 0) {
+            currentTrack.inExplicitSlur = false;
+            currentTrack.explicitSlurNotes = [];
+          }
+          col++;
+          continue;
+        }
         currentTrack.velocity = Math.max(0, currentTrack.velocity - 8);
         col++;
         continue;
@@ -553,13 +693,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               });
             }
 
-            chordNotes.forEach((n) => {
-              if (currentTrack.isPedalOn) {
-                n.hasPedal = true;
-                currentTrack.activePedalNotes.push(n);
-              }
-              currentTrack.notes.push(n);
-            });
+            const hasTrailingTie = /[\^&]$/.test(chordLenStr);
+            registerNotesToTrack(currentTrack, chordNotes, hasTrailingTie);
           }
 
           const chordTokenLen = 1 + chordCloseIdx + afterStrumLen + lenCharsUsed;
@@ -589,6 +724,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       // 11. 休符: r, r4, r8., r4^4
       const restMatch = remaining.match(/^r((?:[\^&]?\d*\.*)*)/i);
       if (restMatch) {
+        currentTrack.pendingTieOrSlur = false;
+        currentTrack.lastNoteGroup = null;
         const restLenStr = restMatch[1];
         const duration = parseDurationLength(restLenStr, currentTrack.defaultLength);
         timelineItems.push({
@@ -638,12 +775,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           column: col + 1,
         };
 
-        if (currentTrack.isPedalOn) {
-          singleNote.hasPedal = true;
-          currentTrack.activePedalNotes.push(singleNote);
-        }
-
-        currentTrack.notes.push(singleNote);
+        const hasTrailingTie = /[\^&]$/.test(noteLenStr);
+        registerNotesToTrack(currentTrack, [singleNote], hasTrailingTie);
 
         timelineItems.push({
           line: lineNumber,

@@ -185,6 +185,39 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </select>
           </div>
         )}
+
+        {/* タイ・スラー記号クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置にタイやスラーの記号を挿入 (音の結合・レガート演奏)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                タイ/スラーを挿入...
+              </option>
+              <optgroup label="タイ (同一音の結合)">
+                <option value="& /* タイ/スラー記号 */">&amp; /* タイ/スラー記号 (前後の音を繋ぐ) */</option>
+                <option value="c4 & c4">c4 &amp; c4 /* タイ (ドを4分+4分伸ばす) */</option>
+                <option value="[ceg]4 & [ceg]4">[ceg]4 &amp; [ceg]4 /* 和音タイ */</option>
+                <option value="^4">^4 /* 音長タイ (^で長さを足す) */</option>
+              </optgroup>
+              <optgroup label="スラー (レガート演奏)">
+                <option value="c4 & d4 & e4">c4 &amp; d4 &amp; e4 /* &amp;によるスラー */</option>
+                <option value="Slur( c4 d4 e4 f4 )">Slur( c4 d4 e4 f4 ) /* フレーズスラー */</option>
+                <option value="SlurOn c4 d4 e4 SlurOff">SlurOn c4 d4 e4 SlurOff /* 区間スラー */</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

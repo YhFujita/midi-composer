@@ -461,6 +461,129 @@ describe('MML Parser', () => {
       expect(findBeatAtCursor(score.timelineItems, 5, 5)).toBe(2.0);
     });
   });
+
+  describe('タイ (Tie) & スラー (Slur)', () => {
+    it('& 記号または ^ 記号で同一音高の音符がタイ結合されること', () => {
+      const code = 'c4 & c4 c4 ^ c8';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+
+      // c4 & c4
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[0].hasTieToNext).toBe(true);
+      expect(notes[0].hasTieFromPrev).toBeFalsy();
+
+      expect(notes[1].pitch).toBe('C4');
+      expect(notes[1].hasTieFromPrev).toBe(true);
+      expect(notes[1].hasTieToNext).toBeFalsy();
+
+      // c4 ^ c8
+      expect(notes[2].pitch).toBe('C4');
+      expect(notes[2].hasTieToNext).toBe(true);
+      expect(notes[2].hasTieFromPrev).toBeFalsy();
+
+      expect(notes[3].pitch).toBe('C4');
+      expect(notes[3].hasTieFromPrev).toBe(true);
+      expect(notes[3].hasTieToNext).toBeFalsy();
+    });
+
+    it('和音 [ceg]4 & [ceg]4 が正しくタイ結合されること', () => {
+      const code = '[ceg]4 & [ceg]2';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(6);
+
+      // 前の和音3音に hasTieToNext が付く
+      expect(notes[0].hasTieToNext).toBe(true);
+      expect(notes[1].hasTieToNext).toBe(true);
+      expect(notes[2].hasTieToNext).toBe(true);
+
+      // 後ろの和音3音に hasTieFromPrev が付く
+      expect(notes[3].hasTieFromPrev).toBe(true);
+      expect(notes[4].hasTieFromPrev).toBe(true);
+      expect(notes[5].hasTieFromPrev).toBe(true);
+    });
+
+    it('& 記号で異なる音高の音符がスラー（レガート）結合されること', () => {
+      const code = 'c4 & d4 & e4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+
+      // スラーIDが共通
+      const slurId = notes[0].slurGroupId;
+      expect(slurId).toBeDefined();
+      expect(notes[1].slurGroupId).toBe(slurId);
+      expect(notes[2].slurGroupId).toBe(slurId);
+
+      // 開始音と終了音
+      expect(notes[0].isSlurStart).toBe(true);
+      expect(notes[0].isSlurEnd).toBeFalsy();
+      expect(notes[1].isSlurStart).toBeFalsy();
+      expect(notes[1].isSlurEnd).toBeFalsy();
+      expect(notes[2].isSlurStart).toBeFalsy();
+      expect(notes[2].isSlurEnd).toBe(true);
+
+      // レガート (gateRate = 1.0)
+      expect(notes[0].gateRate).toBe(1.0);
+      expect(notes[1].gateRate).toBe(1.0);
+      expect(notes[2].gateRate).toBe(1.0);
+    });
+
+    it('Slur(...) コマンドで指定されたフレーズがスラー化されること', () => {
+      const code = 'q4 Slur( c4 d4 e4 f4 ) g4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(5);
+
+      // スラー内の4音
+      const sId = notes[0].slurGroupId;
+      expect(sId).toBeDefined();
+      expect(notes[0].isSlurStart).toBe(true);
+      expect(notes[1].slurGroupId).toBe(sId);
+      expect(notes[2].slurGroupId).toBe(sId);
+      expect(notes[3].slurGroupId).toBe(sId);
+      expect(notes[3].isSlurEnd).toBe(true);
+
+      // スラー外の音符
+      expect(notes[4].slurGroupId).toBeUndefined();
+      expect(notes[4].gateRate).toBe(0.5); // q4 の設定が生きている
+    });
+
+    it('SlurOn / SlurOff コマンドで区間スラーが機能すること', () => {
+      const code = 'SlurOn c4 d4 SlurOff e4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+
+      expect(notes[0].isSlurStart).toBe(true);
+      expect(notes[1].isSlurEnd).toBe(true);
+      expect(notes[0].slurGroupId).toBe(notes[1].slurGroupId);
+      expect(notes[2].slurGroupId).toBeUndefined();
+    });
+
+    it('休符 r を挟んだ場合はタイ・スラーの接続が途切れること', () => {
+      const code = 'c4 & r4 c4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(2);
+      expect(notes[0].hasTieToNext).toBeFalsy();
+      expect(notes[1].hasTieFromPrev).toBeFalsy();
+    });
+  });
 });
 
 

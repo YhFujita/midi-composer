@@ -444,9 +444,27 @@ export class AudioEngine {
     this.activeNodes = [];
 
     score.tracks.forEach((track) => {
-      track.notes.forEach((note) => {
-        const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+      track.notes.forEach((note, noteIdx) => {
+        // タイで直前の音から継続している場合は新規発音しない
+        if (note.hasTieFromPrev) return;
+
+        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         let effectiveEndBeat = note.startTime + noteDur;
+
+        // タイで次の音に継続している場合、タイ末尾の音まで発音を持続
+        if (note.hasTieToNext) {
+          let currentNote = note;
+          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+            const nextNote = track.notes[nextIdx];
+            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+              const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
+              effectiveEndBeat = nextNote.startTime + nextDur;
+              if (!nextNote.hasTieToNext) break;
+              currentNote = nextNote;
+            }
+          }
+        }
+
         if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
           effectiveEndBeat = note.pedalReleaseTime;
         }
@@ -594,9 +612,27 @@ export class AudioEngine {
     masterGain.connect(offlineCtx.destination);
 
     score.tracks.forEach((track) => {
-      track.notes.forEach((note) => {
-        const noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+      track.notes.forEach((note, noteIdx) => {
+        // タイで直前の音から継続している場合は新規発音しない
+        if (note.hasTieFromPrev) return;
+
+        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         let effectiveEndBeat = note.startTime + noteDur;
+
+        // タイで次の音に継続している場合、タイ末尾の音まで発音を持続
+        if (note.hasTieToNext) {
+          let currentNote = note;
+          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+            const nextNote = track.notes[nextIdx];
+            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+              const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
+              effectiveEndBeat = nextNote.startTime + nextDur;
+              if (!nextNote.hasTieToNext) break;
+              currentNote = nextNote;
+            }
+          }
+        }
+
         if (note.pedalReleaseTime !== undefined && note.pedalReleaseTime > effectiveEndBeat) {
           effectiveEndBeat = note.pedalReleaseTime;
         }

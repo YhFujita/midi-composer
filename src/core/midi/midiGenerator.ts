@@ -122,14 +122,33 @@ export function generateMidiBlob(score: ParsedScore): Blob {
     });
 
     // ノートオン / ノートオフ イベント
-    track.notes.forEach((note) => {
-      const dur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+    track.notes.forEach((note, noteIdx) => {
+      // タイで前の音から引き継がれている音符は単独で Note On を発音しない
+      if (note.hasTieFromPrev) return;
+
+      let effectiveDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+      let effectiveEndBeat = note.startTime + effectiveDur;
+
+      // タイで次の音に繋がっている場合、タイが終了する最後の音の末尾まで長さを延長
+      if (note.hasTieToNext) {
+        let currentNote = note;
+        for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+          const nextNote = track.notes[nextIdx];
+          if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+            const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
+            effectiveEndBeat = nextNote.startTime + nextDur;
+            if (!nextNote.hasTieToNext) break;
+            currentNote = nextNote;
+          }
+        }
+      }
+
       // バラシ (ストローク) の微小ディレイ計算 (1音あたり約 20 ticks)
       const strumOffsetTicks = (note.isStrum && note.strumOrder)
         ? Math.round(note.strumOrder * 20)
         : 0;
       const startTick = Math.round(note.startTime * PPQ) + strumOffsetTicks;
-      const endTick = Math.max(startTick + 1, Math.round((note.startTime + dur) * PPQ));
+      const endTick = Math.max(startTick + 1, Math.round(effectiveEndBeat * PPQ));
       const midiNote = Math.max(0, Math.min(127, note.midiNote));
       const velocity = Math.max(1, Math.min(127, note.velocity));
 

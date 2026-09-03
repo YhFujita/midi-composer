@@ -36,4 +36,23 @@ describe('MIDI Generator', () => {
     const hasPedalOff = bytes.some((b, i) => b === 0xb0 && bytes[i + 1] === 0x40 && bytes[i + 2] === 0x00);
     expect(hasPedalOff).toBe(true);
   });
+
+  it('タイで結合された音符 (c4 & c4) が重複発音されずに1音として出力されること', async () => {
+    const mml = 't120 c4 & c4';
+    const score = parseMML(mml);
+    const blob = generateMidiBlob(score);
+
+    const arrayBuffer = await blob.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(arrayBuffer));
+
+    // Note On (0x90, 60, >0) をカウント
+    let noteOnCount = 0;
+    for (let i = 0; i < bytes.length - 2; i++) {
+      if (bytes[i] === 0x90 && bytes[i + 1] === 60 && bytes[i + 2] > 0) {
+        noteOnCount++;
+      }
+    }
+    // タイで2つの音符が結合されているため、Note On は1回のみ
+    expect(noteOnCount).toBe(1);
+  });
 });

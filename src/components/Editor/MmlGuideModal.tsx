@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Music, Play, Layers, ArrowUpDown, Disc } from 'lucide-react';
+import { X, BookOpen, Music, Play, Layers, ArrowUpDown, Disc, Link2 } from 'lucide-react';
 
 interface MmlGuideModalProps {
   isOpen: boolean;
@@ -166,6 +166,33 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
                 <code className="text-sky-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-sky-300 inline-block">Pedal c8 e8 g8 &gt; c8 &lt; g e c4 PedalOff</code>
                 <p className="text-slate-700 mt-1.5 font-medium">
                   🎹 <strong>アルペジオ演奏の響き</strong>: 分散和音を弾く際にペダルを踏むと、音が途切れずに重なり合って本物のピアノのような豊かな響きになります。五線譜上にも <code>Ped.</code> と <code>✱</code> の記号が表示され、MIDI書き出し時にも標準規格の <strong>CC#64 (Sustain)</strong> として出力されます。エディタ上部の「ペダルを挿入」からもワンクリックで入力できます。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* タイ・スラー (音の結合・レガート演奏) */}
+          <div>
+            <h3 className="text-sm font-bold text-indigo-800 flex items-center mb-2">
+              <Link2 className="w-4 h-4 mr-1.5" /> 6. タイ・スラー (音の結合・レガート演奏)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">c4 & c4 / c4 ^ c8</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>タイ (Tie)</strong>: 同じ音高の音符を <code>&amp;</code> や <code>^</code> で結ぶと、後ろの音を打ち直さずに音を伸ばし続けます。五線譜上にも美しいタイ弧線が描画されます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">[ceg]4 & [ceg]4</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>和音タイ</strong>: 和音同士も <code>&amp;</code> でタイ結合でき、コードの響きを滑らかに保ちます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">c4 & d4 & e4 / Slur( c4 d4 e4 f4 ) / SlurOn ... SlurOff</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🎶 <strong>スラー (Slur / レガート演奏)</strong>: 異なる高さの音符を <code>&amp;</code> で結ぶか、<code>Slur( ... )</code> または <code>SlurOn ... SlurOff</code> で囲むと、音と音の隙間をなくして滑らかに演奏するレガートになります。五線譜上にもフレーズ全体を包み込むスラー曲線が美しく描画されます。上部ツールバーの「タイ/スラーを挿入」からワンクリックで入力可能です。
                 </p>
               </div>
             </div>

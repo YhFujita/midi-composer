@@ -21,6 +21,11 @@ export interface NoteEvent {
   column?: number;     // ソース列番号
   hasPedal?: boolean;  // ペダルが有効な区間に発音されたか
   pedalReleaseTime?: number; // ペダルが離される拍数 (離されるまで持続)
+  hasTieToNext?: boolean;   // 次の音符へタイで繋がるか (同一音高)
+  hasTieFromPrev?: boolean; // 前の音符からタイで繋がっているか (同一音高)
+  slurGroupId?: number;     // 所属するスラーグループID
+  isSlurStart?: boolean;    // スラーの開始音か
+  isSlurEnd?: boolean;      // スラーの終了音か
 }
 
 export interface PedalEvent {
