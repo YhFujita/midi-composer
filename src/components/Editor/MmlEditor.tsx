@@ -92,7 +92,7 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
             [/[><\(\)]/, 'operator'],
 
             // 音符 (c, d, e, f, g, a, b + 変化記号 + 音長)
-            [/[a-gA-G][#\+\-_b]?\d*\.*(\^|&)?\d*\.*/, 'string'],
+            [/[a-gA-G][#\+\-_]?\d*\.*(\^|&)?\d*\.*/, 'string'],
 
             // 休符 (r4, r8.)
             [/[rR]\d*\.*(\^|&)?\d*\.*/, 'number'],

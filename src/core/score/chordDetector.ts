@@ -197,7 +197,8 @@ export function detectChordsForMeasure(
   measureIndex: number,
   beatsPerMeasure = 4,
   granularity: ChordDetectionGranularity = 'auto',
-  preferFlat = false
+  preferFlat = false,
+  customBeats?: number[]
 ): MeasureChordInfo[] {
   if (!notes || notes.length === 0) return [];
 
@@ -212,6 +213,23 @@ export function detectChordsForMeasure(
   if (measureNotes.length === 0) return [];
 
   const results: MeasureChordInfo[] = [];
+
+  // ユーザー指定の特定拍位置（customBeats）が指定されている場合
+  if (customBeats && customBeats.length > 0) {
+    const sortedBeats = Array.from(new Set(customBeats)).sort((a, b) => a - b);
+    for (const beat of sortedBeats) {
+      if (beat < 0 || beat >= beatsPerMeasure) continue;
+      const targetBeat = measureStartBeat + beat;
+      const activeNotes = getNotesActiveAt(measureNotes, targetBeat, 0.25);
+      if (activeNotes.length > 0) {
+        const chord = detectChordFromPitches(activeNotes, preferFlat);
+        if (chord) {
+          results.push({ beatOffset: beat, chord });
+        }
+      }
+    }
+    return results;
+  }
 
   if (granularity === 'measure') {
     // 小節頭（または最初の音）のタイミングのコードを1つ抽出

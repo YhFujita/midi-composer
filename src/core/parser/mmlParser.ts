@@ -668,7 +668,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 if (cc === '>') { if (cOct < 9) cOct++; ci++; continue; }
                 if (cc === '<') { if (cOct > 0) cOct--; ci++; continue; }
                 if (cc === "'") { if (cOct < 9) cOct++; ci++; continue; }
-                const nm = insideChord.slice(ci).match(/^([a-gA-G])([#\+\-_b]?)/);
+                const nm = insideChord.slice(ci).match(/^([a-gA-G])([#\+\-_]?)/);
                 if (nm) {
                   const pLet = nm[1].toUpperCase();
                   let acc = nm[2] || '';
@@ -706,7 +706,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           }
 
           // 単音符
-          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_b]?)/i);
+          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_]?)/i);
           if (nMatch) {
             const pLet = nMatch[1].toUpperCase();
             let acc = nMatch[2] || '';
@@ -944,7 +944,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               continue;
             }
 
-            const noteMatch = chordContent.slice(cIdx).match(/^([a-gA-G])([#\+\-_b]?)/);
+            const noteMatch = chordContent.slice(cIdx).match(/^([a-gA-G])([#\+\-_]?)/);
             if (noteMatch) {
               const pitchLetter = noteMatch[1].toUpperCase();
               let acc = noteMatch[2] || '';
@@ -1052,8 +1052,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, b, および長さ)
-      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_b]?)((?:[\^&]?\d*\.*)*)/i);
+      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, および長さ)
+      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_]?)((?:[\^&]?\d*\.*)*)/i);
       if (singleNoteMatch) {
         const noteLetter = singleNoteMatch[1].toUpperCase();
         let accidental = singleNoteMatch[2] || '';

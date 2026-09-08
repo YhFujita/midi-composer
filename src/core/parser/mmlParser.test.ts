@@ -727,6 +727,68 @@ describe('MML Parser', () => {
       expect(notes[3].startTime).toBeCloseTo(1.0, 5);
     });
   });
+
+  describe('音符記譜におけるフラット記号と音名bの認識', () => {
+    it('gやaの直後に小文字bを記述した場合、フラット(♭)ではなく音名b(シ)として認識されること', () => {
+      // gab -> g, a, b の3音
+      const score1 = parseMML('l4 gab');
+      expect(score1.errors).toHaveLength(0);
+      expect(score1.tracks[0].notes).toHaveLength(3);
+      expect(score1.tracks[0].notes[0].pitch).toBe('G4');
+      expect(score1.tracks[0].notes[1].pitch).toBe('A4');
+      expect(score1.tracks[0].notes[2].pitch).toBe('B4');
+
+      // gb -> g, b の2音
+      const score2 = parseMML('l4 gb');
+      expect(score2.errors).toHaveLength(0);
+      expect(score2.tracks[0].notes).toHaveLength(2);
+      expect(score2.tracks[0].notes[0].pitch).toBe('G4');
+      expect(score2.tracks[0].notes[1].pitch).toBe('B4');
+
+      // ab -> a, b の2音
+      const score3 = parseMML('l4 ab');
+      expect(score3.errors).toHaveLength(0);
+      expect(score3.tracks[0].notes).toHaveLength(2);
+      expect(score3.tracks[0].notes[0].pitch).toBe('A4');
+      expect(score3.tracks[0].notes[1].pitch).toBe('B4');
+
+      // cdefgab 全音階
+      const scoreScale = parseMML('l4 cdefgab');
+      expect(scoreScale.errors).toHaveLength(0);
+      expect(scoreScale.tracks[0].notes).toHaveLength(7);
+      expect(scoreScale.tracks[0].notes.map((n) => n.pitch)).toEqual([
+        'C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4'
+      ]);
+    });
+
+    it('和音 [cegb] や [gab] でgの直後のbが音名bとして認識されること', () => {
+      const score = parseMML('[cegb]4');
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+      expect(notes.map((n) => n.pitch)).toEqual(['C4', 'E4', 'G4', 'B4']);
+    });
+
+    it('連符内でもgやaの直後のbが音名bとして認識されること', () => {
+      const score = parseMML('{ g a b }4');
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+      expect(notes[0].pitch).toBe('G4');
+      expect(notes[1].pitch).toBe('A4');
+      expect(notes[2].pitch).toBe('B4');
+    });
+
+    it('フラットは - または _ を使用して引き続き正しく認識されること', () => {
+      const score = parseMML('l4 a- g- d_');
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(3);
+      expect(notes[0].pitch).toBe('G#4'); // A-4 = G#4
+      expect(notes[1].pitch).toBe('F#4'); // G-4 = F#4
+      expect(notes[2].pitch).toBe('C#4'); // D_4 = C#4
+    });
+  });
 });
 
 

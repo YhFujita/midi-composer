@@ -117,6 +117,26 @@ describe('chordDetector', () => {
       expect(detected[1].beatOffset).toBe(2);
       expect(detected[1].chord.chordName).toBe('G');
     });
+
+    it('customBeats で指定した任意の拍位置（例: 0拍目と1.5拍目）でのコードを正しく検出する', () => {
+      const notes: NoteEvent[] = [
+        // 0拍目: C4, E4, G4 (C Major)
+        { pitch: 'C4', midiNote: 60, startTime: 0, duration: 1.5, velocity: 100, trackId: 0, channel: 1 },
+        { pitch: 'E4', midiNote: 64, startTime: 0, duration: 1.5, velocity: 100, trackId: 0, channel: 1 },
+        { pitch: 'G4', midiNote: 67, startTime: 0, duration: 1.5, velocity: 100, trackId: 0, channel: 1 },
+        // 1.5拍目（シンコペーション等）: A3, C4, E4 (Am)
+        { pitch: 'A3', midiNote: 57, startTime: 1.5, duration: 2.5, velocity: 100, trackId: 0, channel: 1 },
+        { pitch: 'C4', midiNote: 60, startTime: 1.5, duration: 2.5, velocity: 100, trackId: 0, channel: 1 },
+        { pitch: 'E4', midiNote: 64, startTime: 1.5, duration: 2.5, velocity: 100, trackId: 0, channel: 1 },
+      ];
+
+      const detected = detectChordsForMeasure(notes, 0, 4, 'auto', false, [0, 1.5]);
+      expect(detected.length).toBe(2);
+      expect(detected[0].beatOffset).toBe(0);
+      expect(detected[0].chord.chordName).toBe('C');
+      expect(detected[1].beatOffset).toBe(1.5);
+      expect(detected[1].chord.chordName).toBe('Am');
+    });
   });
 
   describe('buildChordMml', () => {

@@ -19,9 +19,15 @@ import { ParsedScore, Track, NoteEvent, PedalEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 import { getTripletInfo } from '../../utils/noteConverter';
 
-import { detectChordsForMeasure, ChordDetectionGranularity } from './chordDetector';
+import { detectChordsForMeasure, ChordDetectionGranularity, MeasureChordInfo } from './chordDetector';
 
 export type PartNameDisplayMode = 'abbr' | 'abbrJa' | 'multilineJa' | 'trackOnly';
+
+export interface MeasureChordOverride {
+  measureIndex: number; // 0-indexed (表示・UIは 1-indexed)
+  mode: 'default' | 'none' | 'measure' | 'two-beats' | 'beat' | 'auto' | 'custom';
+  customBeats?: number[]; // 小節内拍オフセット（例: [0, 1.5, 3]）
+}
 
 export interface ScoreDisplayOptions {
   showTitle: boolean;          // 楽譜タイトルを表示するか
@@ -32,7 +38,9 @@ export interface ScoreDisplayOptions {
   customTitle?: string;        // ユーザー指定のカスタムタイトル
   showChords: boolean;         // コードネームを表示するか
   chordGranularity: ChordDetectionGranularity; // 'measure' | 'two-beats' | 'beat' | 'auto'
-  chordTrackSource: 'all' | 'selected';       // 総譜時のコード解析対象
+  chordTrackSource: 'all' | 'selected' | 'custom'; // 総譜・パート譜時のコード解析対象
+  chordTargetTrackIds?: number[]; // コード解析対象トラックID配列 (未指定時は全トラック)
+  measureChordOverrides?: Record<number, MeasureChordOverride>; // 小節別のコード表示位置個別指定
   showTiesAndSlurs?: boolean;  // タイ・スラーの記号を描画するか
 }
 
@@ -45,8 +53,82 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   showChords: true,
   chordGranularity: 'auto',
   chordTrackSource: 'all',
+  chordTargetTrackIds: undefined,
+  measureChordOverrides: {},
   showTiesAndSlurs: true,
 };
+
+/**
+ * 与えられたオプションとトラック一覧に基づき、小節 measureIndex に対するコード解析対象 NoteEvent 群を抽出する
+ */
+export function getChordTargetNotesForMeasure(
+  score: ParsedScore,
+  measureIndex: number,
+  options: ScoreDisplayOptions,
+  fallbackTrackIndex = 0
+): NoteEvent[] {
+  const tracks = score.tracks;
+  if (!tracks || tracks.length === 0) return [];
+
+  const beatsPerMeasure = score.timeSignature?.numerator || 4;
+  const measureStartBeat = measureIndex * beatsPerMeasure;
+  const measureEndBeat = measureStartBeat + beatsPerMeasure;
+
+  let targetTracks: Track[] = [];
+
+  if (options.chordTrackSource === 'selected') {
+    targetTracks = [tracks[fallbackTrackIndex] || tracks[0]];
+  } else if (options.chordTargetTrackIds && options.chordTargetTrackIds.length > 0) {
+    const idSet = new Set(options.chordTargetTrackIds);
+    targetTracks = tracks.filter((t) => idSet.has(t.id));
+    if (targetTracks.length === 0) {
+      targetTracks = tracks;
+    }
+  } else {
+    // 'all' または未指定
+    targetTracks = tracks;
+  }
+
+  // 小節内に存在する音符を抽出
+  return targetTracks.flatMap((t) =>
+    t.notes.filter((n) => n.startTime < measureEndBeat && n.startTime + n.duration > measureStartBeat)
+  );
+}
+
+/**
+ * 指定小節のコード一覧を、基本粒度および小節別オーバーライド設定を考慮して取得する
+ */
+export function getChordsForMeasureWithOptions(
+  notes: NoteEvent[],
+  measureIndex: number,
+  beatsPerMeasure: number,
+  options: ScoreDisplayOptions
+): MeasureChordInfo[] {
+  if (!options.showChords) return [];
+
+  const override = options.measureChordOverrides?.[measureIndex];
+  if (override?.mode === 'none') {
+    return [];
+  }
+
+  if (override?.mode === 'custom' && override.customBeats && override.customBeats.length > 0) {
+    return detectChordsForMeasure(
+      notes,
+      measureIndex,
+      beatsPerMeasure,
+      'auto',
+      false,
+      override.customBeats
+    );
+  }
+
+  const granularity =
+    override?.mode && override.mode !== 'default'
+      ? (override.mode as ChordDetectionGranularity)
+      : options.chordGranularity || 'auto';
+
+  return detectChordsForMeasure(notes, measureIndex, beatsPerMeasure, granularity, false);
+}
 
 /**
  * 音名文字列 ("C4", "F#5", "Bb3") を VexFlow 形式 ("c/4", "f#/5", "bb/3") に変換
@@ -705,11 +787,16 @@ export function renderScoreToSvg(
 
       // コードネーム (和音記号) 描画
       if (options.showChords) {
-        const chords = detectChordsForMeasure(
-          mGroup.notes,
+        const chordNotes =
+          options.chordTrackSource === 'selected'
+            ? mGroup.notes
+            : getChordTargetNotesForMeasure(score, mGroup.measureIndex, options, selectedTrackIndex);
+
+        const chords = getChordsForMeasureWithOptions(
+          chordNotes,
           mGroup.measureIndex,
           beatsPerMeasure,
-          options.chordGranularity || 'auto'
+          options
         );
 
         if (chords.length > 0) {
@@ -970,18 +1057,15 @@ export function renderFullScoreToSvg(
           }
         }
 
-        // コードネーム (和音記号) 描画 (最上段に全パート合算または第1パートから推定して表示)
+        // コードネーム (和音記号) 描画 (最上段に指定トラックから推定して表示)
         if (tIdx === 0 && options.showChords) {
-          const targetNotes: NoteEvent[] =
-            options.chordTrackSource === 'all'
-              ? tracks.flatMap((_, i) => trackMeasureMaps[i].get(mIdx) || [])
-              : trackMeasureMaps[0].get(mIdx) || [];
+          const targetNotes = getChordTargetNotesForMeasure(score, mIdx, options, 0);
 
-          const chords = detectChordsForMeasure(
+          const chords = getChordsForMeasureWithOptions(
             targetNotes,
             mIdx,
             beatsPerMeasure,
-            options.chordGranularity || 'auto'
+            options
           );
 
           if (chords.length > 0) {

@@ -17,8 +17,11 @@ import {
   SlidersHorizontal,
   Check,
   Type,
+  Settings2,
+  Calendar,
 } from 'lucide-react';
 import { getInstrumentByProgram } from '../../constants/instruments';
+import { ChordDisplaySettingsModal } from './ChordDisplaySettingsModal';
 
 interface SheetMusicProps {
   score: ParsedScore;
@@ -43,6 +46,9 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
   // 表示設定ドロップダウンメニューの開閉
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // コード表示詳細設定モーダルの開閉
+  const [isChordSettingsModalOpen, setIsChordSettingsModalOpen] = useState(false);
+
   // 楽譜表示オプション
   const [displayOptions, setDisplayOptions] = useState<ScoreDisplayOptions>(() => {
     try {
@@ -63,6 +69,19 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
   ) => {
     setDisplayOptions((prev) => {
       const updated = { ...prev, [key]: value };
+      try {
+        localStorage.setItem('midi_composer_score_options', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  };
+
+  // 複数オプション一括更新ハンドラ
+  const updateMultipleDisplayOptions = (newOptions: Partial<ScoreDisplayOptions>) => {
+    setDisplayOptions((prev) => {
+      const updated = { ...prev, ...newOptions };
       try {
         localStorage.setItem('midi_composer_score_options', JSON.stringify(updated));
       } catch {
@@ -266,6 +285,26 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
             </div>
           )}
 
+          {/* コード詳細設定ボタン */}
+          <button
+            type="button"
+            onClick={() => setIsChordSettingsModalOpen(true)}
+            className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 shadow-sm cursor-pointer"
+            style={{ backgroundColor: '#ffffff', color: '#0f172a', opacity: 1 }}
+            title="コード自動生成・表示の詳細設定（解析トラック選択、小節別拍位置指定）"
+          >
+            <Settings2 className="w-3.5 h-3.5 text-blue-600" />
+            <span>コード設定</span>
+            {displayOptions.showChords && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+            )}
+            {Object.keys(displayOptions.measureChordOverrides || {}).length > 0 && (
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1 rounded font-mono font-bold">
+                {Object.keys(displayOptions.measureChordOverrides || {}).length}小節
+              </span>
+            )}
+          </button>
+
           {/* 表示設定ポップオーバー */}
           <div className="relative" ref={settingsMenuRef}>
             <button
@@ -398,9 +437,10 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                     </label>
 
                     {displayOptions.showChords && (
-                      <div className="pl-3.5 space-y-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                      <div className="pl-3.5 space-y-2.5 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        {/* 基本解析単位 */}
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-slate-700 font-medium">解析の単位:</span>
+                          <span className="text-[11px] text-slate-700 font-medium">解析の基本単位:</span>
                           <select
                             value={displayOptions.chordGranularity || 'auto'}
                             onChange={(e) =>
@@ -409,27 +449,46 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                             className="bg-white border border-slate-300 text-slate-900 text-[11px] rounded px-1.5 py-0.5 outline-none font-medium"
                           >
                             <option value="auto">自動 (変化タイミング)</option>
-                            <option value="measure">小節ごと (1小節1つ)</option>
-                            <option value="two-beats">2拍ごと (半小節単位)</option>
+                            <option value="measure">小節ごと (1拍目のみ)</option>
+                            <option value="two-beats">2拍ごと (1・3拍目)</option>
                             <option value="beat">毎拍 (1拍ごと)</option>
                           </select>
                         </div>
 
-                        {viewMode === 'score' && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-slate-700 font-medium">総譜の解析対象:</span>
-                            <select
-                              value={displayOptions.chordTrackSource || 'all'}
-                              onChange={(e) =>
-                                updateDisplayOption('chordTrackSource', e.target.value as any)
-                              }
-                              className="bg-white border border-slate-300 text-slate-900 text-[11px] rounded px-1.5 py-0.5 outline-none font-medium"
-                            >
-                              <option value="all">全パート合算 (伴奏+ベース)</option>
-                              <option value="selected">第1パートのみ</option>
-                            </select>
+                        {/* 詳細設定モーダル起動ボタン */}
+                        <div className="pt-1 border-t border-slate-200/80">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSettingsOpen(false);
+                              setIsChordSettingsModalOpen(true);
+                            }}
+                            className="w-full flex items-center justify-center space-x-1.5 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md border border-blue-200 text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            <Settings2 className="w-3.5 h-3.5 text-blue-600" />
+                            <span>トラック選択・小節別拍指定...</span>
+                          </button>
+
+                          {/* 現在の設定状況のサマリー */}
+                          <div className="mt-1.5 text-[10px] text-slate-500 space-y-0.5">
+                            <div className="flex justify-between">
+                              <span>解析トラック:</span>
+                              <span className="font-semibold text-slate-700">
+                                {displayOptions.chordTrackSource === 'custom' && displayOptions.chordTargetTrackIds
+                                  ? `選択中 (${displayOptions.chordTargetTrackIds.length}パート)`
+                                  : '全パート合算'}
+                              </span>
+                            </div>
+                            {Object.keys(displayOptions.measureChordOverrides || {}).length > 0 && (
+                              <div className="flex justify-between text-emerald-700 font-medium">
+                                <span>小節別個別指定:</span>
+                                <span>
+                                  {Object.keys(displayOptions.measureChordOverrides || {}).length}小節設定中
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -485,6 +544,15 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
           style={{ transformOrigin: 'top center' }}
         />
       </div>
+
+      {/* コード自動生成・表示詳細設定モーダル */}
+      <ChordDisplaySettingsModal
+        isOpen={isChordSettingsModalOpen}
+        onClose={() => setIsChordSettingsModalOpen(false)}
+        score={score}
+        displayOptions={displayOptions}
+        onUpdateOptions={updateMultipleDisplayOptions}
+      />
     </div>
   );
 };
