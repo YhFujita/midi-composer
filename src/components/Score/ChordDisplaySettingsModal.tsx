@@ -44,13 +44,11 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
   // 拍位置手動追加用の入力値
   const [newBeatInput, setNewBeatInput] = useState<string>('0.0');
 
-  if (!isOpen) return null;
-
-  const tracks = score.tracks || [];
-  const beatsPerMeasure = score.timeSignature?.numerator || 4;
+  const tracks = score?.tracks || [];
+  const beatsPerMeasure = score?.timeSignature?.numerator || 4;
   const totalMeasures = Math.max(
     1,
-    Math.ceil((score.totalDuration || 16) / beatsPerMeasure)
+    Math.ceil(((score?.totalDuration ?? 16)) / beatsPerMeasure)
   );
 
   // 現在のトラック選択設定
@@ -135,15 +133,15 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
     const beatMap = new Map<number, { pitches: string[]; trackNames: string[] }>();
 
     targetTracks.forEach((t) => {
-      t.notes.forEach((n) => {
-        if (n.startTime >= measureStartBeat && n.startTime < measureEndBeat) {
+      t.notes?.forEach((n) => {
+        if (n && typeof n.startTime === 'number' && n.startTime >= measureStartBeat && n.startTime < measureEndBeat) {
           // 4分音符基準の小節内拍オフセット（1/16音符精度 0.25拍に丸め）
           const offset = Math.round((n.startTime - measureStartBeat) * 4) / 4;
           if (!beatMap.has(offset)) {
             beatMap.set(offset, { pitches: [], trackNames: [] });
           }
           const item = beatMap.get(offset)!;
-          if (!item.pitches.includes(n.pitch)) {
+          if (n.pitch && !item.pitches.includes(n.pitch)) {
             item.pitches.push(n.pitch);
           }
           const tName = t.name || `TR${t.id + 1}`;
@@ -212,16 +210,19 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
 
   // 設定済み小節の一覧
   const configuredMeasures = useMemo(() => {
-    const overrides = displayOptions.measureChordOverrides || {};
+    const overrides = displayOptions?.measureChordOverrides || {};
     return Object.keys(overrides)
       .map((k) => parseInt(k, 10))
+      .filter((mIdx) => !isNaN(mIdx) && overrides[mIdx] != null)
       .sort((a, b) => a - b)
       .map((mIdx) => ({
         measureIndex: mIdx,
         measureNumber: mIdx + 1,
         override: overrides[mIdx],
       }));
-  }, [displayOptions.measureChordOverrides]);
+  }, [displayOptions?.measureChordOverrides]);
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -378,7 +379,7 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-500 mt-0.5">
-                            チャンネル: {track.channel} | ノート数: {track.notes.length}
+                            チャンネル: {track.channel} | ノート数: {track.notes?.length || 0}
                           </div>
                         </div>
                       </div>
@@ -752,16 +753,16 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
                     {configuredMeasures.map((item) => {
                       const isCurrent = item.measureNumber === selectedMeasureNumber;
                       const modeLabel =
-                        item.override.mode === 'none'
+                        item.override?.mode === 'none'
                           ? '非表示'
-                          : item.override.mode === 'measure'
+                          : item.override?.mode === 'measure'
                           ? '1拍目'
-                          : item.override.mode === 'two-beats'
+                          : item.override?.mode === 'two-beats'
                           ? '2拍ごと'
-                          : item.override.mode === 'beat'
+                          : item.override?.mode === 'beat'
                           ? '毎拍'
-                          : item.override.mode === 'custom'
-                          ? `拍:[${item.override.customBeats?.map((b) => b.toFixed(1)).join(', ')}]`
+                          : item.override?.mode === 'custom'
+                          ? `拍:[${item.override?.customBeats?.map((b) => b.toFixed(1)).join(', ') || ''}]`
                           : '';
 
                       return (
