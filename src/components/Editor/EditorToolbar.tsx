@@ -151,7 +151,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           </button>
         )}
 
-        {/* 移調コマンドクイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {/* 調号（Key Signature）クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
         {onInsertText && (
           <div className="flex items-center space-x-1 pl-1">
             <select
@@ -164,10 +164,62 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               }}
               className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
               style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
-              title="エディタのカーソル位置に移調コマンドを挿入 (曲の途中での転調に便利)"
+              title="調号 (Key Signature) を挿入 (五線譜に調号を表示し、MML音符に自動で#や♭を適用)"
             >
               <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
-                移調を挿入...
+                調号 (Key) を挿入...
+              </option>
+              <optgroup label="長調 (シャープ系 #)">
+                <option value="Key C /* ハ長調 (#/♭なし) */">Key C (ハ長調: 記号なし)</option>
+                <option value="Key G /* ト長調 (#1) */">Key G (ト長調: #1 [F#])</option>
+                <option value="Key D /* ニ長調 (#2) */">Key D (ニ長調: #2 [F#,C#])</option>
+                <option value="Key A /* イ長調 (#3) */">Key A (イ長調: #3 [F#,C#,G#])</option>
+                <option value="Key E /* ホ長調 (#4) */">Key E (ホ長調: #4 [F#,C#,G#,D#])</option>
+                <option value="Key B /* ロ長調 (#5) */">Key B (ロ長調: #5 [F#,C#,G#,D#,A#])</option>
+                <option value="Key F# /* 嬰ヘ長調 (#6) */">Key F# (嬰ヘ長調: #6)</option>
+              </optgroup>
+              <optgroup label="長調 (フラット系 ♭)">
+                <option value="Key F /* ヘ長調 (♭1) */">Key F (ヘ長調: ♭1 [Bb])</option>
+                <option value="Key Bb /* 変ロ長調 (♭2) */">Key Bb (変ロ長調: ♭2 [Bb,Eb])</option>
+                <option value="Key Eb /* 変ホ長調 (♭3) */">Key Eb (変ホ長調: ♭3 [Bb,Eb,Ab])</option>
+                <option value="Key Ab /* 変イ長調 (♭4) */">Key Ab (変イ長調: ♭4)</option>
+                <option value="Key Db /* 変ニ長調 (♭5) */">Key Db (変ニ長調: ♭5)</option>
+                <option value="Key Gb /* 変ト長調 (♭6) */">Key Gb (変ト長調: ♭6)</option>
+              </optgroup>
+              <optgroup label="短調 (Minor Keys)">
+                <option value="Key Am /* イ短調 */">Key Am (イ短調: 記号なし)</option>
+                <option value="Key Em /* ホ短調 (#1) */">Key Em (ホ短調: #1)</option>
+                <option value="Key Bm /* ロ短調 (#2) */">Key Bm (ロ短調: #2)</option>
+                <option value="Key F#m /* 嬰ヘ短調 (#3) */">Key F#m (嬰ヘ短調: #3)</option>
+                <option value="Key C#m /* 嬰ハ短調 (#4) */">Key C#m (嬰ハ短調: #4)</option>
+                <option value="Key Dm /* ニ短調 (♭1) */">Key Dm (ニ短調: ♭1)</option>
+                <option value="Key Gm /* ト短調 (♭2) */">Key Gm (ト短調: ♭2)</option>
+                <option value="Key Cm /* ハ短調 (♭3) */">Key Cm (ハ短調: ♭3)</option>
+              </optgroup>
+              <optgroup label="調号下の臨時記号例">
+                <option value="f= /* Fナチュラル(白鍵) */">f= (調号下のナチュラル例)</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
+
+        {/* 半音移調 (Transpose) クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="半音単位の移調 (Transpose / KeyShift) を挿入 (音高を平行移動)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                移調 (半音シフト)...
               </option>
               <optgroup label="パート移調 (トラック別)">
                 <option value="Key(-1) /* 短2度↓ */">Key(-1) /* 短2度下げ(半音↓) */</option>

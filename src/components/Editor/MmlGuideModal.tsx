@@ -123,23 +123,27 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
             </div>
           </div>
 
-          {/* 移調・キー変更 */}
+          {/* 調号 (Key Signature) と 移調 (Transpose) */}
           <div>
             <h3 className="text-sm font-bold text-emerald-800 flex items-center mb-2">
-              <ArrowUpDown className="w-4 h-4 mr-1.5" /> 4. 移調 (キー変更・転調)
+              <ArrowUpDown className="w-4 h-4 mr-1.5" /> 4. 調号 (Key Signature) と 移調 (Transpose)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Key E / Key F# / Key Bb / Key Em / KeySignature("E")</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🎼 <strong>調号 (Key Signature) の指定</strong>: 楽曲の調を指定します。五線譜の先頭に調号（#や♭）が描画され、MML上で単に <code className="bg-white px-1 py-0.2 rounded border border-slate-300">f</code> や <code className="bg-white px-1 py-0.2 rounded border border-slate-300">g</code> と書くだけで自動的に調号に従ったシャープ・フラット音として発音されます。
+                  <br />
+                  曲の途中で何度記述しても、その都度転調した新しい調号が楽譜に反映されます。調号下でナチュラル（白鍵）を鳴らしたい場合は <code className="bg-white px-1 py-0.2 rounded border border-slate-300">f=</code> または <code className="bg-white px-1 py-0.2 rounded border border-slate-300">fn</code> と記述します。
+                </p>
+              </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
                 <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Key(-1) / Key(2) / Key(0)</code>
-                <p className="text-slate-700 mt-1.5 font-medium">パート移調 (半音単位)。-1で短2度下げ(半音↓)、+2で長2度上げ(全音↑)。曲の途中でも自由に変更可能です</p>
+                <p className="text-slate-700 mt-1.5 font-medium">パート移調 (半音単位)。-1で短2度下げ(半音↓)、+2で長2度上げ(全音↑)。数値指定により音高を平行移動します</p>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
                 <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">MasterKey(-1) / MasterKey(1)</code>
-                <p className="text-slate-700 mt-1.5 font-medium">楽曲全体の移調。曲頭または途中で全パートを一括転調します</p>
-              </div>
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
-                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Transpose(n) / _k(n) / 画面上部「移調」ボタン</code>
-                <p className="text-slate-700 mt-1.5 font-medium">互換コマンドに対応。また、エディタツールバーの「移調を挿入」からワンクリックでカーソル位置へ挿入でき、上部バーの「移調 [-] [±0] [+]」からも即座に試聴・キー変更が可能です</p>
+                <p className="text-slate-700 mt-1.5 font-medium">楽曲全体の半音移調。曲頭または途中で全パートを一括シフトします</p>
               </div>
             </div>
           </div>

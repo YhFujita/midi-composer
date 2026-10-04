@@ -15,7 +15,7 @@ import {
   CurvePosition,
   Tuplet,
 } from 'vexflow';
-import { ParsedScore, Track, NoteEvent, PedalEvent } from '../../types/mml';
+import { ParsedScore, Track, NoteEvent, PedalEvent, KeySignatureEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 import { getTripletInfo } from '../../utils/noteConverter';
 
@@ -34,6 +34,7 @@ export interface ScoreDisplayOptions {
   showSubInfo?: boolean;       // タイトル下の詳細情報 (パート数・テンポ・拍子・小節数等) を表示するか
   showTempo: boolean;          // テンポ指示 (♩=120) を表示するか
   showTimeSignature: boolean;  // 拍子記号 (4/4 等) を表示するか
+  showKeySignature?: boolean;  // 調号 (Key Signature) を表示するか
   showTrackDetails: boolean;   // パート別の個別指示(テンポ/拍子等)を表示するか
   customTitle?: string;        // ユーザー指定のカスタムタイトル
   showChords: boolean;         // コードネームを表示するか
@@ -49,6 +50,7 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   showSubInfo: true,
   showTempo: true,
   showTimeSignature: true,
+  showKeySignature: true,
   showTrackDetails: true,
   showChords: true,
   chordGranularity: 'auto',
@@ -145,6 +147,29 @@ export function pitchToVexKey(pitch: string): { key: string; accidental?: string
 
   const key = `${note}${acc ? acc : ''}/${oct}`;
   return { key, accidental: acc || undefined };
+}
+
+/**
+ * 指定した拍数（beat）におけるアクティブな調号情報を取得する
+ */
+export function getKeySignatureAtBeat(
+  keyEvents: KeySignatureEvent[] | undefined,
+  defaultKey: string | undefined,
+  beat: number
+): { name: string; vexKey: string } {
+  const fallback = defaultKey || 'C';
+  if (!keyEvents || keyEvents.length === 0) {
+    return { name: fallback, vexKey: fallback };
+  }
+  let active = keyEvents[0];
+  for (const ev of keyEvents) {
+    if (beat >= ev.time - 0.01) {
+      active = ev;
+    } else {
+      break;
+    }
+  }
+  return { name: active.key, vexKey: active.vexKey };
 }
 
 /**
@@ -311,10 +336,28 @@ function createVexNotesForMeasure(
     const accidentals: { index: number; acc: string }[] = [];
 
     noteGroup.forEach((n, kIdx) => {
-      const { key, accidental } = pitchToVexKey(n.pitch);
-      keys.push(key);
-      if (accidental) {
-        accidentals.push({ index: kIdx, acc: accidental });
+      // 調号によって変化した音（isKeyAltered = true）の場合:
+      // 楽譜上は調号がすでに効いているため、臨時記号（#や♭）は付けずに幹音位置として描画する
+      if (n.isKeyAltered) {
+        const match = n.pitch.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
+        const letter = match ? match[1].toLowerCase() : 'c';
+        const oct = match ? match[2] : '4';
+        keys.push(`${letter}/${oct}`);
+      } else if (n.accidentalType === 'n') {
+        // 明示的ナチュラル
+        const match = n.pitch.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
+        const letter = match ? match[1].toLowerCase() : 'c';
+        const oct = match ? match[2] : '4';
+        keys.push(`${letter}/${oct}`);
+        accidentals.push({ index: kIdx, acc: 'n' });
+      } else {
+        const { key, accidental } = pitchToVexKey(n.pitch);
+        keys.push(key);
+        if (n.accidentalType) {
+          accidentals.push({ index: kIdx, acc: n.accidentalType });
+        } else if (accidental) {
+          accidentals.push({ index: kIdx, acc: accidental });
+        }
       }
     });
 
@@ -763,10 +806,27 @@ export function renderScoreToSvg(
 
       const stave = new Stave(x, y, staveWidth);
 
+      // 調号（Key Signature）および転調の判定
+      const trackKeyEvents = track.keySignatureEvents || score.keySignatureEvents;
+      const trackInitialKey = track.initialKeySignature || score.initialKeySignature;
+      const curBeat = mGroup.measureIndex * beatsPerMeasure;
+      const prevBeat = idx > 0 ? measureGroups[idx - 1].measureIndex * beatsPerMeasure : -1;
+      const curKey = getKeySignatureAtBeat(trackKeyEvents, trackInitialKey, curBeat);
+      const prevKey = prevBeat >= 0 ? getKeySignatureAtBeat(trackKeyEvents, trackInitialKey, prevBeat) : null;
+      const isKeyChangedInThisMeasure = prevKey !== null && prevKey.name !== curKey.name;
+
       if (c === 0) {
         stave.addClef(defaultClef);
+        if (options.showKeySignature !== false && curKey.vexKey && curKey.vexKey !== 'C') {
+          stave.addKeySignature(curKey.vexKey);
+        }
         if (r === 0 && options.showTimeSignature) {
           stave.addTimeSignature(`${trackTimeSig.numerator}/${trackTimeSig.denominator}`);
+        }
+      } else if (isKeyChangedInThisMeasure && options.showKeySignature !== false) {
+        // 曲の途中で転調が発生した小節: 段の途中でも新しい調号を描画
+        if (curKey.vexKey) {
+          stave.addKeySignature(curKey.vexKey);
         }
       }
 
@@ -993,8 +1053,20 @@ export function renderFullScoreToSvg(
         const trackTempo = track.initialTempo || globalTempo;
         const hasCustomTempo = track.initialTempo && track.initialTempo !== globalTempo;
 
+        // 調号（Key Signature）および転調の判定
+        const trackKeyEvents = track.keySignatureEvents || score.keySignatureEvents;
+        const trackInitKey = track.initialKeySignature || score.initialKeySignature;
+        const curBeat = mIdx * beatsPerMeasure;
+        const prevBeat = mIdx > 0 ? (mIdx - 1) * beatsPerMeasure : -1;
+        const curKey = getKeySignatureAtBeat(trackKeyEvents, trackInitKey, curBeat);
+        const prevKey = prevBeat >= 0 ? getKeySignatureAtBeat(trackKeyEvents, trackInitKey, prevBeat) : null;
+        const isKeyChangedInThisMeasure = prevKey !== null && prevKey.name !== curKey.name;
+
         if (c === 0) {
           stave.addClef(clef);
+          if (options.showKeySignature !== false && curKey.vexKey && curKey.vexKey !== 'C') {
+            stave.addKeySignature(curKey.vexKey);
+          }
           if (r === 0 && options.showTimeSignature) {
             stave.addTimeSignature(`${trackSig.numerator}/${trackSig.denominator}`);
           }
@@ -1028,6 +1100,10 @@ export function renderFullScoreToSvg(
             ctx.fillText(labelLine1, 8, staveY + 45);
           }
           ctx.restore();
+        } else if (isKeyChangedInThisMeasure && options.showKeySignature !== false) {
+          if (curKey.vexKey) {
+            stave.addKeySignature(curKey.vexKey);
+          }
         }
 
         if (mIdx === totalMeasures - 1) {

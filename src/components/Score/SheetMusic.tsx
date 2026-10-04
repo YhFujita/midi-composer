@@ -396,6 +396,17 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                     />
                   </label>
 
+                  {/* 調号表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
+                    <span className="text-slate-800 font-medium">調号を表示 (Key Signature: #, ♭)</span>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showKeySignature !== false}
+                      onChange={(e) => updateDisplayOption('showKeySignature', e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
                   {/* パート個別指示 (スコア譜) */}
                   <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
                     <span className="text-slate-800 font-medium">パート別の個別テンポ/拍子を表示</span>

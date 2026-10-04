@@ -30,6 +30,8 @@ export interface NoteEvent {
   tupletGroupId?: number;   // 所属する連符グループID
   tupletNumber?: number;    // 連符の音数 (例: 3)
   tupletOccupied?: number;  // 本来の音数 (例: 2)
+  isKeyAltered?: boolean;   // 調号（Key Signature）によって自動的に変化した音か
+  accidentalType?: '#' | 'b' | 'n'; // 楽譜に描画すべき明示的臨時記号（ナチュラル等）
 }
 
 export interface PedalEvent {
@@ -61,6 +63,14 @@ export interface MasterKeyEvent {
   shift: number;       // 移調半音数 (例: -1, +2)
 }
 
+export interface KeySignatureEvent {
+  time: number;        // 拍数 (転調タイミング)
+  key: string;         // 標準調名 (例: "E", "F#", "Bb", "Am")
+  vexKey: string;      // VexFlow用調名
+  sharpsFlats: number; // シャープ(+) または フラット(-) の数
+  alteredNotes: Record<string, '#' | 'b'>; // 各幹音の変化記号
+}
+
 export interface Track {
   id: number;
   name: string;
@@ -69,9 +79,11 @@ export interface Track {
   notes: NoteEvent[];
   tempoEvents?: TempoEvent[];
   timeSignatureEvents?: TimeSignatureEvent[];
+  keySignatureEvents?: KeySignatureEvent[];
   initialTempo?: number;
   initialTimeSignature?: { numerator: number; denominator: number };
-  initialKey?: number;
+  initialKey?: number; // トラック移調量 (半音単位)
+  initialKeySignature?: string; // トラック開始時の初期調名 (例: "E")
   pedalEvents?: PedalEvent[];
 }
 
@@ -101,6 +113,8 @@ export interface ParsedScore {
   timeSignature: { numerator: number; denominator: number };
   totalDuration: number; // 全体の長さ（拍数）
   masterKeyEvents?: MasterKeyEvent[];
+  keySignatureEvents?: KeySignatureEvent[];
+  initialKeySignature?: string;
   globalKeyShift?: number;
   pedalEvents?: PedalEvent[];
   timelineItems?: MmlTimelineItem[];
