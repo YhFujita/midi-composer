@@ -828,7 +828,12 @@ export class AudioEngine {
     const duration = Math.max(1.0, this.totalDurationSec + 1.0);
     const length = Math.ceil(sampleRate * duration);
 
-    const OfflineAudioCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    const OfflineAudioCtxClass =
+      (typeof window !== 'undefined' && (window.OfflineAudioContext || (window as any).webkitOfflineAudioContext)) ||
+      (globalThis as any).OfflineAudioContext;
+    if (!OfflineAudioCtxClass) {
+      throw new Error('お使いのブラウザ環境では OfflineAudioContext がサポートされていません。');
+    }
     const offlineCtx = new OfflineAudioCtxClass(2, length, sampleRate);
 
     // 現時点ではブラウザ間互換性と安定性のため、Offline時は確実かつ高速なオシレータ合成またはフォールバックパイプラインを使用

@@ -1,6 +1,6 @@
 import { audioEngine } from './soundFontPlayer';
 import { ParsedScore } from '../../types/mml';
-import lamejs from 'lamejs';
+import { Mp3Encoder } from '@breezystack/lamejs';
 
 /**
  * Float32 配列 (-1.0 ~ 1.0) を Int16 配列 (-32768 ~ 32767) に変換する
@@ -33,7 +33,7 @@ export async function exportToMp3(
   const sampleRate = audioBuffer.sampleRate;
   const kbps = 192; // 192 kbps 高音質
 
-  const mp3Encoder = new (lamejs as any).Mp3Encoder(channels, sampleRate, kbps);
+  const mp3Encoder = new Mp3Encoder(channels, sampleRate, kbps);
   const mp3Data: Uint8Array[] = [];
 
   const leftChannel = audioBuffer.getChannelData(0);
@@ -41,14 +41,19 @@ export async function exportToMp3(
 
   const sampleBlockSize = 1152; // LAME の標準フレームサイズ
   const leftInt16 = convertFloat32ToInt16(leftChannel);
-  const rightInt16 = convertFloat32ToInt16(rightChannel);
+  const rightInt16 = channels > 1 ? convertFloat32ToInt16(rightChannel) : undefined;
 
   const numSamples = leftInt16.length;
   for (let i = 0; i < numSamples; i += sampleBlockSize) {
     const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
-    const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+    let mp3buf: Uint8Array;
+    if (channels > 1 && rightInt16) {
+      const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+      mp3buf = mp3Encoder.encodeBuffer(leftChunk, rightChunk);
+    } else {
+      mp3buf = mp3Encoder.encodeBuffer(leftChunk);
+    }
 
-    const mp3buf = mp3Encoder.encodeBuffer(leftChunk, rightChunk);
     if (mp3buf.length > 0) {
       mp3Data.push(new Uint8Array(mp3buf));
     }

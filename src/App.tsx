@@ -333,6 +333,11 @@ export const App: React.FC = () => {
   // MP3 エクスポート
   const handleExportMp3 = useCallback(async () => {
     try {
+      const totalNotes = parsedScore.tracks.reduce((sum, t) => sum + t.notes.length, 0);
+      if (totalNotes === 0) {
+        alert('出力できる有効な音符がありません。MMLエディタを確認してください。');
+        return;
+      }
       setIsExportingMp3(true);
       setMp3Progress(0);
       const mp3Blob = await exportToMp3(parsedScore, (percent) => {
@@ -341,8 +346,8 @@ export const App: React.FC = () => {
       const baseName = currentFilename.replace(/\.[^/.]+$/, '');
       downloadBlob(mp3Blob, `${baseName}.mp3`);
     } catch (err) {
-      console.error('MP3書き出しエラー:', err);
-      alert('MP3ファイルの生成中にエラーが発生しました。');
+      console.error('MP3エクスポートエラー:', err);
+      alert(`MP3ファイルの生成中にエラーが発生しました: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsExportingMp3(false);
     }
