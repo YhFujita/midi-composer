@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "download:soundfont": "node scripts/download-soundfont.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

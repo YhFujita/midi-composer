@@ -71,7 +71,7 @@ export class AudioEngine {
       await synth.isReady;
 
       // SoundFont データのロード (IndexedDB または fetch)
-      const buffer = await soundFontManager.loadDefaultSoundFont();
+      const buffer = await soundFontManager.initActiveSoundFont();
 
       // SoundBank の登録
       await synth.soundBankManager.addSoundBank(buffer, 'main');
@@ -79,7 +79,7 @@ export class AudioEngine {
       this.synth = synth;
       this.isSoundFontReady = true;
       this.isSynthInitializing = false;
-      console.log('SpessaSynth SoundFont engine ready with TimGM6mb.sf2');
+      console.log('SpessaSynth SoundFont engine ready with active SoundFont');
       return true;
     } catch (err) {
       console.warn('SoundFont engine initialization deferred or fallback to oscillator:', err);

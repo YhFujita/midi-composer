@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 大容量 SoundFont ファイル (GitHub上限100MB対策)
+public/soundfonts/*.sf2
+!public/soundfonts/TimGM6mb.sf2
+*.sf3

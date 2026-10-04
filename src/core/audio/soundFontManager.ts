@@ -1,6 +1,8 @@
 /**
- * SoundFont のロード、IndexedDB キャッシュ、カスタム音源管理を行うマネージャー
+ * SoundFont のロード、IndexedDB キャッシュ、プリセットおよびローカル音源管理を行うマネージャー
  */
+
+import { SOUNDFONT_PRESETS, SoundFontPreset } from '../../constants/soundfonts';
 
 export interface SoundFontMeta {
   id: string;
@@ -24,9 +26,8 @@ type StateListener = (state: SoundFontState) => void;
 const DB_NAME = 'midi_composer_soundfonts';
 const DB_VERSION = 1;
 const STORE_NAME = 'soundfonts';
-const DEFAULT_SF2_URL = '/soundfonts/TimGM6mb.sf2';
+const ACTIVE_SF2_STORAGE_KEY = 'midi_composer_active_sf2_id';
 const DEFAULT_SF2_ID = 'timgm6mb_default';
-const DEFAULT_SF2_NAME = 'TimGM6mb (内蔵 GM音源)';
 
 class SoundFontManager {
   private state: SoundFontState = {
@@ -94,7 +95,7 @@ class SoundFontManager {
   /**
    * IndexedDB から SoundFont データを取得
    */
-  private async getFromCache(id: string): Promise<{ meta: SoundFontMeta; buffer: ArrayBuffer } | null> {
+  public async getFromCache(id: string): Promise<{ meta: SoundFontMeta; buffer: ArrayBuffer } | null> {
     try {
       const db = await this.getDB();
       return new Promise((resolve) => {
@@ -201,13 +202,71 @@ class SoundFontManager {
   }
 
   /**
-   * デフォルトの SoundFont (TimGM6mb.sf2) をロード
+   * ストリーミングダウンロード共通関数
    */
-  public async loadDefaultSoundFont(): Promise<ArrayBuffer> {
+  private async fetchBufferWithProgress(url: string, estimatedTotalBytes: number): Promise<ArrayBuffer> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`ダウンロードに失敗しました (ステータス: ${response.status} ${response.statusText})`);
+    }
+
+    const contentLength = response.headers.get('content-length');
+    const totalBytes = contentLength ? parseInt(contentLength, 10) : estimatedTotalBytes;
+
+    if (response.body) {
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let receivedBytes = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        receivedBytes += value.length;
+        const pct = Math.min(98, Math.round(15 + (receivedBytes / totalBytes) * 80));
+        this.updateState({ progress: pct });
+      }
+
+      const totalBuffer = new Uint8Array(receivedBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        totalBuffer.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return totalBuffer.buffer;
+    } else {
+      return await response.arrayBuffer();
+    }
+  }
+
+  /**
+   * プリセット音源のローカル存在とキャッシュ状態を確認
+   */
+  public async checkPresetStatus(preset: SoundFontPreset): Promise<{ isLocal: boolean; isCached: boolean }> {
+    // 1. キャッシュの確認
+    const cached = await this.getFromCache(preset.id);
+    const isCached = !!(cached && cached.buffer && cached.buffer.byteLength > 0);
+
+    // 2. ローカルフォルダ (public/soundfonts/...) の確認
+    let isLocal = false;
+    try {
+      const res = await fetch(preset.localUrl, { method: 'HEAD' });
+      isLocal = res.ok;
+    } catch {
+      isLocal = false;
+    }
+
+    return { isLocal, isCached };
+  }
+
+  /**
+   * プリセット SoundFont のロード
+   */
+  public async loadPresetSoundFont(preset: SoundFontPreset): Promise<ArrayBuffer> {
     this.updateState({ status: 'loading', progress: 10, errorMessage: undefined });
 
     // 1. まず IndexedDB キャッシュを確認
-    const cached = await this.getFromCache(DEFAULT_SF2_ID);
+    const cached = await this.getFromCache(preset.id);
     if (cached && cached.buffer && cached.buffer.byteLength > 0) {
       this.currentBuffer = cached.buffer;
       this.updateState({
@@ -215,55 +274,26 @@ class SoundFontManager {
         progress: 100,
         currentSoundFont: cached.meta,
       });
+      try {
+        localStorage.setItem(ACTIVE_SF2_STORAGE_KEY, preset.id);
+      } catch {}
       return cached.buffer;
     }
 
-    // 2. キャッシュにない場合はネットワークからダウンロード
+    // 2. ローカルフォルダ (public/soundfonts/) から取得を試行
     try {
-      this.updateState({ progress: 20 });
-      const response = await fetch(DEFAULT_SF2_URL);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch soundfont: ${response.status} ${response.statusText}`);
-      }
-
-      const contentLength = response.headers.get('content-length');
-      const totalBytes = contentLength ? parseInt(contentLength, 10) : 6000000;
-
-      let buffer: ArrayBuffer;
-      if (response.body) {
-        const reader = response.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let receivedBytes = 0;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          receivedBytes += value.length;
-          const pct = Math.min(95, Math.round(20 + (receivedBytes / totalBytes) * 75));
-          this.updateState({ progress: pct });
-        }
-
-        const totalBuffer = new Uint8Array(receivedBytes);
-        let offset = 0;
-        for (const chunk of chunks) {
-          totalBuffer.set(chunk, offset);
-          offset += chunk.length;
-        }
-        buffer = totalBuffer.buffer;
-      } else {
-        buffer = await response.arrayBuffer();
-      }
+      this.updateState({ progress: 15 });
+      const buffer = await this.fetchBufferWithProgress(preset.localUrl, preset.size);
 
       const meta: SoundFontMeta = {
-        id: DEFAULT_SF2_ID,
-        name: DEFAULT_SF2_NAME,
+        id: preset.id,
+        name: preset.name,
         size: buffer.byteLength,
-        isDefault: true,
+        isDefault: !!preset.isDefault,
         updatedAt: Date.now(),
       };
 
-      // IndexedDB にキャッシュ保存
+      // IndexedDB に保存
       await this.saveToCache(meta, buffer);
 
       this.currentBuffer = buffer;
@@ -272,17 +302,94 @@ class SoundFontManager {
         progress: 100,
         currentSoundFont: meta,
       });
-
+      try {
+        localStorage.setItem(ACTIVE_SF2_STORAGE_KEY, preset.id);
+      } catch {}
       return buffer;
-    } catch (err: any) {
-      const msg = err?.message || 'SoundFontのダウンロードに失敗しました';
-      this.updateState({
-        status: 'error',
-        progress: 0,
-        errorMessage: msg,
-      });
-      throw err;
+    } catch (localErr: any) {
+      console.warn(`ローカルフォルダ (${preset.localUrl}) からの取得失敗、外部URLの確認へ:`, localErr);
+
+      // 3. 外部オンラインURLが指定されている場合はそちらを試行
+      if (preset.onlineDownloadUrl) {
+        try {
+          this.updateState({ progress: 15 });
+          const buffer = await this.fetchBufferWithProgress(preset.onlineDownloadUrl, preset.size);
+
+          const meta: SoundFontMeta = {
+            id: preset.id,
+            name: preset.name,
+            size: buffer.byteLength,
+            isDefault: !!preset.isDefault,
+            updatedAt: Date.now(),
+          };
+
+          await this.saveToCache(meta, buffer);
+
+          this.currentBuffer = buffer;
+          this.updateState({
+            status: 'ready',
+            progress: 100,
+            currentSoundFont: meta,
+          });
+          try {
+            localStorage.setItem(ACTIVE_SF2_STORAGE_KEY, preset.id);
+          } catch {}
+          return buffer;
+        } catch (onlineErr: any) {
+          const msg = `「${preset.name}」の読み込みに失敗しました。プロジェクトの public/soundfonts/ フォルダに「${preset.filename}」を配置するか、ターミナルで npm run download:soundfont を実行してください。`;
+          this.updateState({ status: 'error', progress: 0, errorMessage: msg });
+          throw new Error(msg);
+        }
+      }
+
+      const msg = `音源ファイル「${preset.filename}」が見つかりませんでした。`;
+      this.updateState({ status: 'error', progress: 0, errorMessage: msg });
+      throw new Error(msg);
     }
+  }
+
+  /**
+   * デフォルトの SoundFont (TimGM6mb.sf2) をロード
+   */
+  public async loadDefaultSoundFont(): Promise<ArrayBuffer> {
+    const defaultPreset = SOUNDFONT_PRESETS.find((p) => p.id === DEFAULT_SF2_ID) || SOUNDFONT_PRESETS[0];
+    return this.loadPresetSoundFont(defaultPreset);
+  }
+
+  /**
+   * 起動時に保存されていたアクティブ音源（またはデフォルト）をロード
+   */
+  public async initActiveSoundFont(): Promise<ArrayBuffer> {
+    let savedId: string | null = null;
+    try {
+      savedId = localStorage.getItem(ACTIVE_SF2_STORAGE_KEY);
+    } catch {}
+
+    if (savedId) {
+      // プリセットか確認
+      const preset = SOUNDFONT_PRESETS.find((p) => p.id === savedId);
+      if (preset) {
+        try {
+          return await this.loadPresetSoundFont(preset);
+        } catch (e) {
+          console.warn(`前回保存されたプリセット (${savedId}) の復元に失敗したため、デフォルト音源に切り替えます`, e);
+        }
+      } else {
+        // カスタム音源か確認
+        const cached = await this.getFromCache(savedId);
+        if (cached && cached.buffer) {
+          this.currentBuffer = cached.buffer;
+          this.updateState({
+            status: 'ready',
+            progress: 100,
+            currentSoundFont: cached.meta,
+          });
+          return cached.buffer;
+        }
+      }
+    }
+
+    return this.loadDefaultSoundFont();
   }
 
   /**
@@ -310,6 +417,10 @@ class SoundFontManager {
         currentSoundFont: meta,
       });
 
+      try {
+        localStorage.setItem(ACTIVE_SF2_STORAGE_KEY, meta.id);
+      } catch {}
+
       return buffer;
     } catch (err: any) {
       const msg = err?.message || 'カスタムSoundFontの読み込みに失敗しました';
@@ -322,12 +433,14 @@ class SoundFontManager {
   }
 
   /**
-   * 保存済み SoundFont に切り替え
+   * 保存済み / プリセット SoundFont に切り替え
    */
   public async switchToSoundFont(id: string): Promise<ArrayBuffer> {
-    if (id === DEFAULT_SF2_ID) {
-      return await this.loadDefaultSoundFont();
+    const preset = SOUNDFONT_PRESETS.find((p) => p.id === id);
+    if (preset) {
+      return this.loadPresetSoundFont(preset);
     }
+
     const item = await this.getFromCache(id);
     if (!item) {
       throw new Error('指定されたSoundFontが見つかりません');
@@ -338,6 +451,11 @@ class SoundFontManager {
       progress: 100,
       currentSoundFont: item.meta,
     });
+
+    try {
+      localStorage.setItem(ACTIVE_SF2_STORAGE_KEY, id);
+    } catch {}
+
     return item.buffer;
   }
 
