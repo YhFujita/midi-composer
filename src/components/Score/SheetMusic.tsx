@@ -27,11 +27,19 @@ interface SheetMusicProps {
   score: ParsedScore;
   currentBeat: number;
   isPlaying: boolean;
+  cursorMeasureIndex?: number;
+  onSelectMeasure?: (measureIndex: number) => void;
 }
 
 export type ScoreViewMode = 'score' | 'part';
 
-export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPlaying }) => {
+export const SheetMusic: React.FC<SheetMusicProps> = ({
+  score,
+  currentBeat,
+  isPlaying,
+  cursorMeasureIndex,
+  onSelectMeasure,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
 
@@ -177,6 +185,82 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
       renderScoreToSvg(containerRef.current, score, selectedTrack, targetWidth, displayOptions);
     }
   }, [score, viewMode, selectedTrack, zoom, partNameMode, containerWidth, displayOptions, isPrinting]);
+
+  // 楽譜内の小節クリックイベント登録 (エディタへのフォーカス連動)
+  useEffect(() => {
+    if (!containerRef.current || !onSelectMeasure) return;
+
+    const handleContainerClick = (e: MouseEvent) => {
+      const target = (e.target as Element)?.closest('.measure-focus-overlay');
+      if (target) {
+        const mIdx = parseInt(target.getAttribute('data-measure-index') || '-1', 10);
+        if (mIdx >= 0) {
+          onSelectMeasure(mIdx);
+        }
+      }
+    };
+
+    const containerEl = containerRef.current;
+    containerEl.addEventListener('click', handleContainerClick);
+    return () => {
+      containerEl.removeEventListener('click', handleContainerClick);
+    };
+  }, [onSelectMeasure]);
+
+  // カーソル位置および再生進行に伴う小節ハイライト＆追従スクロール
+  const lastScrolledMeasureRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const beatsPerMeasure = score.timeSignature.numerator || 4;
+    // 再生中は再生位置、停止中はエディタカーソル位置
+    const activeMeasure = isPlaying
+      ? Math.floor(currentBeat / beatsPerMeasure)
+      : (cursorMeasureIndex !== undefined ? cursorMeasureIndex : null);
+
+    const overlays = containerRef.current.querySelectorAll('.measure-focus-overlay');
+    let targetOverlay: SVGElement | null = null;
+
+    overlays.forEach((el) => {
+      const idx = parseInt(el.getAttribute('data-measure-index') || '-1', 10);
+      if (activeMeasure !== null && idx === activeMeasure) {
+        targetOverlay = el as SVGElement;
+        el.setAttribute('fill', 'rgba(59, 130, 246, 0.08)');
+        el.setAttribute('stroke', '#3b82f6');
+        el.setAttribute('stroke-width', '2');
+      } else {
+        el.setAttribute('fill', 'transparent');
+        el.setAttribute('stroke', 'transparent');
+        el.setAttribute('stroke-width', '2');
+      }
+    });
+
+    // スクロール処理: 小節が変わった時、画面外にあればスムーズにスクロール
+    if (targetOverlay && activeMeasure !== null && activeMeasure !== lastScrolledMeasureRef.current) {
+      lastScrolledMeasureRef.current = activeMeasure;
+
+      // スクロール親コンテナ (div.overflow-auto)
+      const scrollParent = containerRef.current.parentElement;
+      if (scrollParent) {
+        const targetRect = (targetOverlay as SVGElement).getBoundingClientRect();
+        const parentRect = scrollParent.getBoundingClientRect();
+
+        const margin = 50;
+        const isOutOfView =
+          targetRect.top < parentRect.top + margin ||
+          targetRect.bottom > parentRect.bottom - margin;
+
+        if (isOutOfView) {
+          (targetOverlay as SVGElement).scrollIntoView({
+            behavior: isPlaying ? 'auto' : 'smooth',
+            block: 'center',
+            inline: 'nearest',
+          });
+        }
+      }
+    }
+  }, [cursorMeasureIndex, currentBeat, isPlaying, score]);
 
   const handlePrint = () => {
     setIsPrinting(true);
@@ -425,6 +509,23 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({ score, currentBeat, isPl
                       type="checkbox"
                       checked={displayOptions.showTiesAndSlurs !== false}
                       onChange={(e) => updateDisplayOption('showTiesAndSlurs', e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
+                  {/* 構成記号・リハーサルマーク表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
+                    <div className="flex flex-col">
+                      <span className="text-slate-800 font-medium flex items-center">
+                        <Tag className="w-3.5 h-3.5 mr-1 text-blue-600" />
+                        構成記号 (リハーサルマーク)
+                      </span>
+                      <span className="text-[10px] text-slate-500">小節上の 🄰, 🄱, [Intro] 等を表示</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showRehearsalMarks !== false}
+                      onChange={(e) => updateDisplayOption('showRehearsalMarks', e.target.checked)}
                       className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
                     />
                   </label>

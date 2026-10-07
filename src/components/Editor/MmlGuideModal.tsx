@@ -235,6 +235,39 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
             </div>
           </div>
 
+          {/* 構成記号・リハーサルマーク */}
+          <div>
+            <h3 className="text-sm font-bold text-indigo-800 flex items-center mb-2">
+              <BookOpen className="w-4 h-4 mr-1.5" /> 8. 構成記号・リハーサルマーク (🄰, 🄱, [Intro], [Chorus] 等)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">🄰 / 🄱 / 🄲 / 🄳</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>四角囲み文字</strong>: Unicode の四角囲み文字でセクションを指定できます。五線譜上の小節頭に角丸四角枠付きの記号として美しく描画されます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">[A] / [B] / [Intro] / [Chorus]</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>ブラケット記法</strong>: <code>[A]</code>, <code>[B]</code> や <code>[Intro]</code>, <code>[Verse]</code>, <code>[Chorus]</code>, <code>[Bridge]</code>, <code>[Outro]</code>, <code>[サビ]</code> などで小節にセクション記号を付与できます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-indigo-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-indigo-300 inline-block">Mark("A") / Section("Chorus")</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>コマンド記法</strong>: 明示的な関数呼び出し形式でも記述可能です。ツールバーの「構成記号 (🄰, 🄱)...」からワンクリックで挿入できます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <span className="text-blue-700 font-bold inline-block">💡 カーソル連動スクロール</span>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  エディタ内でカーソルを置いた小節へ、楽譜が自動で連動して移動し青い枠でハイライトされます。また楽譜の小節をクリックするとエディタもその小節へ移動します。
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* 楽器選択パレット・出力機能のご案内 */}
           <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs shadow-sm">
             <h4 className="font-bold text-blue-900 flex items-center gap-1.5 mb-1.5 text-xs">

@@ -1,4 +1,4 @@
-import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem } from '../../types/mml';
+import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
 import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo } from '../../utils/noteConverter';
 import { parseKeySignature, KeySignatureInfo, getDefaultKeySignature } from '../../utils/keySignature';
 
@@ -16,6 +16,7 @@ interface TrackState {
   keySignature: KeySignatureInfo; // トラックの現在のアクティブな調号
   initialKeySignature?: string;   // トラック開始時の初期調名 (例: "E")
   keySignatureEvents: KeySignatureEvent[]; // 調号変更イベント
+  rehearsalMarks: RehearsalMarkEvent[];   // 構成記号・リハーサルマーク
   currentTime: number; // 4分音符基準の累積時間
   notes: NoteEvent[];
   tempoEvents: TempoEvent[];
@@ -41,6 +42,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
   const timeSignatures: TimeSignatureEvent[] = [{ time: 0, numerator: 4, denominator: 4 }];
   const masterKeyEvents: MasterKeyEvent[] = [{ time: 0, shift: 0 }];
   const scoreKeySignatureEvents: KeySignatureEvent[] = [];
+  const scoreRehearsalMarks: RehearsalMarkEvent[] = [];
   let defaultScoreKey: KeySignatureInfo = getDefaultKeySignature();
   const uiGlobalKeyShift = options?.globalKeyShift || 0;
   let scoreTitle: string | undefined;
@@ -74,6 +76,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         keySignature: { ...defaultScoreKey },
         initialKeySignature: undefined,
         keySignatureEvents: [],
+        rehearsalMarks: [],
         currentTime: 0,
         notes: [],
         tempoEvents: [],
@@ -301,9 +304,123 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       // コマンド解析 (大文字・小文字両対応)
       const remaining = rawLine.slice(col);
 
-      // 0. 小節線 | やカンマ , などの区切り記号をスキップ
+      // 0. 小節線 | やカンマ , などの区切り記号
       if (char === '|' || char === ',') {
+        if (char === '|') {
+          timelineItems.push({
+            line: lineNumber,
+            startColumn: col + 1,
+            endColumn: col + 1,
+            trackId: currentTrack.id,
+            beat: currentTrack.currentTime,
+            type: 'rehearsalMark',
+          });
+        }
         col++;
+        continue;
+      }
+
+      // 0.001 楽譜構成記号・リハーサルマーク (🄰, 🄱, 🄲, Mark("A"), Section("Intro"), [A], [Intro] 等)
+      let rehearsalMarkText: string | null = null;
+      let rehearsalMarkLen = 0;
+
+      // (A) Unicode 囲み文字 (四角囲み文字 🄰-🅉, 角丸絵文字 🅰🅱🅾🆎, 丸囲み文字 Ⓐ-Ⓩ, 丸数字 ①-⑳ 等)
+      const unicodeBoxMatch = remaining.match(/^([\u{1F130}-\u{1F149}\u{1F170}-\u{1F18E}\u{24B6}-\u{24E9}\u{2460}-\u{2473}])/u);
+      if (unicodeBoxMatch) {
+        const charStr = unicodeBoxMatch[1];
+        const cp = charStr.codePointAt(0)!;
+        if (cp >= 0x1F130 && cp <= 0x1F149) {
+          rehearsalMarkText = String.fromCharCode(65 + cp - 0x1F130);
+        } else if (cp >= 0x24B6 && cp <= 0x24CF) {
+          rehearsalMarkText = String.fromCharCode(65 + cp - 0x24B6);
+        } else if (cp >= 0x24D0 && cp <= 0x24E9) {
+          rehearsalMarkText = String.fromCharCode(65 + cp - 0x24D0);
+        } else if (cp >= 0x2460 && cp <= 0x2473) {
+          rehearsalMarkText = String(cp - 0x2460 + 1);
+        } else if (cp === 0x1F170) {
+          rehearsalMarkText = 'A';
+        } else if (cp === 0x1F171) {
+          rehearsalMarkText = 'B';
+        } else if (cp === 0x1F17E) {
+          rehearsalMarkText = 'O';
+        } else if (cp === 0x1F18E) {
+          rehearsalMarkText = 'AB';
+        } else {
+          rehearsalMarkText = charStr;
+        }
+        rehearsalMarkLen = unicodeBoxMatch[0].length;
+      }
+
+      // (B) 明示的関数/コマンド記法: Mark("A"), Mark(A), Section("Intro"), Rehearsal("Chorus") 等
+      if (!rehearsalMarkText) {
+        const markFuncMatch = remaining.match(/^(?:Mark|Section|Rehearsal)\s*(?:\(\s*["'「]?([^"'」\)]+)["'」]?\s*\)|[:\s=]+["'「]?([^"'」\s,\|]+)["'」]?)/i);
+        if (markFuncMatch) {
+          rehearsalMarkText = (markFuncMatch[1] || markFuncMatch[2] || '').trim();
+          rehearsalMarkLen = markFuncMatch[0].length;
+        }
+      }
+
+      // (C) ブラケット記法: [A], [B], [Intro], [Chorus], [Verse], [Bridge], [Outro], [サビ] 等
+      // 和音 ([ceg]4 等) と衝突しないよう、セクション名または大文字単一アルファベット、数字等を厳密に判定
+      if (!rehearsalMarkText && remaining.startsWith('[')) {
+        const bracketMatch = remaining.match(/^\[([^\]]+)\]/);
+        if (bracketMatch) {
+          const rawContent = bracketMatch[1].trim();
+          // 1. 明示的プレフィックス [Mark: A] や [Section: Chorus]
+          const prefixMatch = rawContent.match(/^(?:Mark|Section|Rehearsal)[:\s]+(.+)$/i);
+          if (prefixMatch) {
+            rehearsalMarkText = prefixMatch[1].trim();
+            rehearsalMarkLen = bracketMatch[0].length;
+          }
+          // 2. 一般的な曲構成セクション名 (大文字小文字問わず / 日本語対応)
+          else if (/^(?:Intro|Verse|Chorus|Bridge|Outro|Interlude|Ending|Coda|Fine|PreChorus|Pre-Chorus|Hook|Theme|Solo|サビ|イントロ|間奏|エンディング|Aメロ|Bメロ|Cメロ|展開部|提示部|再現部)$/i.test(rawContent)) {
+            rehearsalMarkText = rawContent;
+            rehearsalMarkLen = bracketMatch[0].length;
+          }
+          // 3. 単一英大文字 [A] 〜 [Z]、または [A'], [B2] 等（和音は通常2音以上かつ小文字メイン、単音大文字はリハーサル記号）
+          else if (/^[A-Z](?:['’]|(?:\d+))?$/.test(rawContent)) {
+            rehearsalMarkText = rawContent;
+            rehearsalMarkLen = bracketMatch[0].length;
+          }
+          // 4. 数字 [1], [2], [3] 等
+          else if (/^\d+$/.test(rawContent)) {
+            rehearsalMarkText = rawContent;
+            rehearsalMarkLen = bracketMatch[0].length;
+          }
+          // 5. 角カッコ内に Unicode 囲み文字がある場合: [🄰]
+          else if (/^[\u{1F130}-\u{1F149}\u{1F170}-\u{1F18E}\u{24B6}-\u{24E9}\u{2460}-\u{2473}]$/u.test(rawContent)) {
+            const cp = rawContent.codePointAt(0)!;
+            if (cp >= 0x1F130 && cp <= 0x1F149) {
+              rehearsalMarkText = String.fromCharCode(65 + cp - 0x1F130);
+            } else {
+              rehearsalMarkText = rawContent;
+            }
+            rehearsalMarkLen = bracketMatch[0].length;
+          }
+        }
+      }
+
+      if (rehearsalMarkText) {
+        const timeSigNumerator = currentTrack.timeSignatureEvents[0]?.numerator || timeSignatures[0]?.numerator || 4;
+        const markEvent: RehearsalMarkEvent = {
+          time: currentTrack.currentTime,
+          text: rehearsalMarkText,
+          measureIndex: Math.floor(currentTrack.currentTime / timeSigNumerator),
+          trackId: currentTrack.id,
+          line: lineNumber,
+          column: col + 1,
+        };
+        currentTrack.rehearsalMarks.push(markEvent);
+        scoreRehearsalMarks.push(markEvent);
+        timelineItems.push({
+          line: lineNumber,
+          startColumn: col + 1,
+          endColumn: col + rehearsalMarkLen,
+          trackId: currentTrack.id,
+          beat: currentTrack.currentTime,
+          type: 'rehearsalMark',
+        });
+        col += rehearsalMarkLen;
         continue;
       }
 
@@ -1256,6 +1373,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       tempoEvents: sortedTempo,
       timeSignatureEvents: sortedTimeSig,
       keySignatureEvents: ts.keySignatureEvents.sort((a, b) => a.time - b.time),
+      rehearsalMarks: ts.rehearsalMarks.sort((a, b) => a.time - b.time),
       pedalEvents: ts.pedalEvents.sort((a, b) => a.time - b.time),
       initialTempo: sortedTempo[0]?.bpm,
       initialTimeSignature: sortedTimeSig[0]
@@ -1290,6 +1408,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     totalDuration: maxDuration,
     masterKeyEvents: masterKeyEvents.sort((a, b) => a.time - b.time),
     keySignatureEvents: scoreKeySignatureEvents.sort((a, b) => a.time - b.time),
+    rehearsalMarks: scoreRehearsalMarks.sort((a, b) => a.time - b.time),
     initialKeySignature: scoreKeySignatureEvents[0]?.key || defaultScoreKey.name,
     globalKeyShift: uiGlobalKeyShift,
     pedalEvents: allPedalEvents.sort((a, b) => a.time - b.time),

@@ -14,6 +14,7 @@ export interface CursorPosition {
 export interface MmlEditorActions {
   insertText: (text: string) => void;
   deleteBackward: () => void;
+  setPosition?: (lineNumber: number, column: number) => void;
 }
 
 interface MmlEditorProps {
@@ -66,7 +67,7 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
           'TR', 'TRACK', 'CH', 'CHANNEL', 'VOICE', 'PROGRAM',
           'TEMPO', 'TIME', 'TIMESIGNATURE', 'OCTAVE', 'LENGTH', 'VOLUME',
           'KEY', 'TRANSPOSE', 'MASTERKEY', 'MASTERTRANSPOSE',
-          'PEDAL', 'PEDALOFF'
+          'PEDAL', 'PEDALOFF', 'MARK', 'SECTION', 'REHEARSAL'
         ],
 
         tokenizer: {
@@ -75,6 +76,10 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
             [/\/\/.*$/, 'comment'],
             [/;.*$/, 'comment'],
             [/\/\*/, 'comment', '@comment'],
+
+            // 楽譜構成記号・リハーサルマーク (🄰, 🄱, [A], [Intro] 等)
+            [/[\u{1F130}-\u{1F149}\u{1F170}-\u{1F18E}\u{24B6}-\u{24E9}\u{2460}-\u{2473}]/u, 'annotation'],
+            [/\[(?:Intro|Verse|Chorus|Bridge|Outro|Interlude|Ending|Coda|Fine|PreChorus|Pre-Chorus|Hook|Theme|Solo|サビ|イントロ|間奏|エンディング|Aメロ|Bメロ|Cメロ|[A-Z](?:['’]|\d+)?|\d+)\]/i, 'annotation'],
 
             // ペダルコマンド (Pedal, PedalOff, P1, P0, _P, _p)
             [/(?:PedalOff|Pedal|P1|P0|_P|_p)\b/i, 'keyword'],
@@ -123,6 +128,7 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
           { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
           { token: 'keyword', foreground: '569CD6', fontStyle: 'bold' },
           { token: 'type', foreground: '4EC9B0', fontStyle: 'bold' },
+          { token: 'annotation', foreground: '38BDF8', fontStyle: 'bold' }, // 構成記号・リハーサルマーク (水色太字)
           { token: 'string', foreground: 'CE9178', fontStyle: 'bold' }, // 音符
           { token: 'variable', foreground: 'DCDCAA' }, // 和音
           { token: 'number', foreground: 'B5CEA8' }, // 休符・数値
@@ -436,15 +442,25 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
     editor.focus();
   }, []);
 
+  // カーソル位置を外部から指定して移動・スクロール表示
+  const setCursorPosition = useCallback((lineNumber: number, column: number) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.setPosition({ lineNumber, column });
+    editor.revealPositionInCenterIfOutsideViewport({ lineNumber, column });
+    editor.focus();
+  }, []);
+
   // 外部からのアクション参照を登録
   useEffect(() => {
     if (editorActionsRef) {
       editorActionsRef.current = {
         insertText: insertTextAtCursor,
         deleteBackward,
+        setPosition: setCursorPosition,
       };
     }
-  }, [editorActionsRef, insertTextAtCursor, deleteBackward]);
+  }, [editorActionsRef, insertTextAtCursor, deleteBackward, setCursorPosition]);
 
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">

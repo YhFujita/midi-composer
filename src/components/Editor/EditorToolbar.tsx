@@ -328,6 +328,46 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </select>
           </div>
         )}
+
+        {/* 構成記号 (リハーサルマーク: 🄰, 🄱 等) クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-slate-300 text-slate-900 font-medium text-[11px] rounded-md px-2 py-1 outline-none hover:border-slate-400 focus:border-blue-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置に曲の構成記号・リハーサルマーク (🄰, 🄱, [Intro], [Chorus] 等) を挿入 (五線譜にも角丸四角枠で描画されます)"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                構成記号 (🄰, 🄱)...
+              </option>
+              <optgroup label="四角囲み文字 (Unicode)">
+                <option value="🄰 ">🄰 (Aセクション / Aメロ)</option>
+                <option value="🄱 ">🄱 (Bセクション / Bメロ)</option>
+                <option value="🄲 ">🄲 (Cセクション / サビ)</option>
+                <option value="🄳 ">🄳 (Dセクション)</option>
+              </optgroup>
+              <optgroup label="ブラケット記法 (角カッコ)">
+                <option value="[Intro] ">[Intro] (イントロ)</option>
+                <option value="[A] ">[A] (Aメロ)</option>
+                <option value="[B] ">[B] (Bメロ)</option>
+                <option value="[Chorus] ">[Chorus] (サビ)</option>
+                <option value="[Bridge] ">[Bridge] (間奏・ブリッジ)</option>
+                <option value="[Outro] ">[Outro] (アウトロ・エンディング)</option>
+              </optgroup>
+              <optgroup label="コマンド記法">
+                <option value='Mark("A") '>Mark("A")</option>
+                <option value='Section("Chorus") '>Section("Chorus")</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 右エリア: 現在の入力場所へ出力ボタン & 書式設定 */}

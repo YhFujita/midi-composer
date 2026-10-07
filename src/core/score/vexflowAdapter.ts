@@ -43,6 +43,7 @@ export interface ScoreDisplayOptions {
   chordTargetTrackIds?: number[]; // コード解析対象トラックID配列 (未指定時は全トラック)
   measureChordOverrides?: Record<number, MeasureChordOverride>; // 小節別のコード表示位置個別指定
   showTiesAndSlurs?: boolean;  // タイ・スラーの記号を描画するか
+  showRehearsalMarks?: boolean; // 構成記号・リハーサルマーク (🄰, 🄱 等) を描画するか
 }
 
 export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
@@ -58,6 +59,7 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   chordTargetTrackIds: undefined,
   measureChordOverrides: {},
   showTiesAndSlurs: true,
+  showRehearsalMarks: true,
 };
 
 /**
@@ -713,6 +715,74 @@ function getTrackClef(track: Track): string {
 }
 
 /**
+ * リハーサルマーク（構成記号: 🄰, 🄱, [Intro], [Chorus] 等）を描画するヘルパー
+ * 角丸四角枠（Box）に太字文字で、五線や他の記号と重ならず目立つよう描画
+ * @returns 描画されたマークボックスの横幅
+ */
+export function renderRehearsalMark(
+  ctx: any,
+  text: string,
+  staveX: number,
+  staveY: number
+): number {
+  ctx.save();
+
+  // 文字列の正規化（Unicode囲み文字などが残っていればA-Zに変換）
+  let displayText = text;
+  if (/^[\u{1F130}-\u{1F149}]$/u.test(text)) {
+    displayText = String.fromCharCode(65 + text.codePointAt(0)! - 0x1F130);
+  }
+
+  const isSingleLetter = displayText.length === 1;
+  const fontSize = isSingleLetter ? 12.5 : 10.5;
+  ctx.setFont('sans-serif', fontSize, 'bold');
+
+  // 文字幅の推定
+  let textWidth = 0;
+  if (typeof ctx.measureText === 'function') {
+    try {
+      const m = ctx.measureText(displayText);
+      textWidth = m.width || 0;
+    } catch {
+      textWidth = 0;
+    }
+  }
+  if (!textWidth) {
+    textWidth = isSingleLetter ? 11 : displayText.length * 7.5;
+  }
+
+  const paddingX = isSingleLetter ? 6 : 7;
+  const boxWidth = Math.max(22, textWidth + paddingX * 2);
+  const boxHeight = 21;
+  const markX = staveX + 6;
+  const markY = staveY - boxHeight - 8; // 五線上部から適切な余白
+
+  // 1. 白背景の角丸四角形（完全不透明、五線や加線と重なっても視認性を維持）
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(markX, markY, boxWidth, boxHeight, 4);
+  } else if (typeof ctx.rect === 'function') {
+    ctx.rect(markX, markY, boxWidth, boxHeight);
+  }
+  ctx.setFillStyle('#ffffff');
+  ctx.fill();
+
+  // 2. 枠線 (濃いグレー/黒、太さ 1.8px)
+  ctx.setStrokeStyle('#0f172a');
+  ctx.setLineWidth(1.8);
+  ctx.stroke();
+
+  // 3. テキスト描画 (中央配置)
+  ctx.setFillStyle('#0f172a');
+  const textX = markX + (boxWidth - textWidth) / 2;
+  const textY = markY + boxHeight - 5.5;
+  ctx.fillText(displayText, textX, textY);
+
+  ctx.restore();
+  return boxWidth;
+}
+
+/**
  * 【パート譜】指定した単一トラックの楽譜を描画する（低音加線保護＆改ページ対応）
  */
 export function renderScoreToSvg(
@@ -836,12 +906,26 @@ export function renderScoreToSvg(
 
       stave.setContext(ctx).draw();
 
-      // テンポ指示 (メトロノーム記号) 描画
+      // リハーサルマーク（構成記号: 🄰, 🄱, [Intro] 等）描画
+      let rehearsalMarkBoxWidth = 0;
+      if (options.showRehearsalMarks !== false) {
+        const curMeasureStartBeat = mGroup.measureIndex * beatsPerMeasure;
+        const curMeasureEndBeat = curMeasureStartBeat + beatsPerMeasure;
+        const marks = (score.rehearsalMarks || []).filter(
+          (m) => m.time >= curMeasureStartBeat - 0.01 && m.time < curMeasureEndBeat - 0.01
+        );
+        if (marks.length > 0) {
+          rehearsalMarkBoxWidth = renderRehearsalMark(ctx, marks[0].text, x, y);
+        }
+      }
+
+      // テンポ指示 (メトロノーム記号) 描画 (リハーサルマークがある場合は横に並べて描画)
       if (r === 0 && c === 0 && options.showTempo) {
         ctx.save();
         ctx.setFont('sans-serif', 10.5, 'bold');
         ctx.setFillStyle('#0f172a');
-        ctx.fillText(`♩ = ${trackTempo}`, x + 5, y - 10);
+        const tempoX = rehearsalMarkBoxWidth > 0 ? x + rehearsalMarkBoxWidth + 14 : x + 5;
+        ctx.fillText(`♩ = ${trackTempo}`, tempoX, y - 10);
         ctx.restore();
       }
 
@@ -925,6 +1009,28 @@ export function renderScoreToSvg(
         } catch {
           // ignore
         }
+      }
+
+      // 小節フォーカス・連動スクロール用オーバーレイ要素
+      if (svgElem) {
+        const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        overlay.setAttribute('class', 'measure-focus-overlay');
+        overlay.setAttribute('data-measure-index', String(mGroup.measureIndex));
+        overlay.setAttribute('data-measure-number', String(mGroup.measureIndex + 1));
+        overlay.setAttribute('x', String(x));
+        overlay.setAttribute('y', String(y - 25));
+        overlay.setAttribute('width', String(staveWidth));
+        overlay.setAttribute('height', String(staveHeight - 20));
+        overlay.setAttribute('rx', '6');
+        overlay.setAttribute('ry', '6');
+        overlay.setAttribute('fill', 'transparent');
+        overlay.setAttribute('stroke', 'transparent');
+        overlay.setAttribute('stroke-width', '2');
+        overlay.style.pointerEvents = 'all';
+        overlay.style.cursor = 'pointer';
+        overlay.style.transition = 'all 0.15s ease-in-out';
+        overlay.setAttribute('title', `第 ${mGroup.measureIndex + 1} 小節 (クリックで選択)`);
+        svgElem.appendChild(overlay);
       }
     }
   }
@@ -1113,14 +1219,28 @@ export function renderFullScoreToSvg(
         stave.setContext(ctx).draw();
         stavesInMeasure.push(stave);
 
-        // テンポ指示の描画
+        // 最上段トラック (tIdx === 0) でのリハーサルマーク（構成記号: 🄰, 🄱 等）描画
+        let rehearsalMarkBoxWidth = 0;
+        if (tIdx === 0 && options.showRehearsalMarks !== false) {
+          const curMeasureStartBeat = mIdx * beatsPerMeasure;
+          const curMeasureEndBeat = curMeasureStartBeat + beatsPerMeasure;
+          const marks = (score.rehearsalMarks || []).filter(
+            (m) => m.time >= curMeasureStartBeat - 0.01 && m.time < curMeasureEndBeat - 0.01
+          );
+          if (marks.length > 0) {
+            rehearsalMarkBoxWidth = renderRehearsalMark(ctx, marks[0].text, x, staveY);
+          }
+        }
+
+        // テンポ指示の描画 (リハーサルマークがある場合は横に並べて描画)
         if (r === 0 && c === 0 && options.showTempo) {
           // 最上段（全体テンポ）
           if (tIdx === 0) {
             ctx.save();
             ctx.setFont('sans-serif', 10.5, 'bold');
             ctx.setFillStyle('#0f172a');
-            ctx.fillText(`♩ = ${globalTempo}`, x + 5, staveY - 8);
+            const tempoX = rehearsalMarkBoxWidth > 0 ? x + rehearsalMarkBoxWidth + 14 : x + 5;
+            ctx.fillText(`♩ = ${globalTempo}`, tempoX, staveY - 8);
             ctx.restore();
           }
           // パート個別のテンポ指示（パート詳細表示が有効で、全体と異なるまたは明示指定されている場合）
@@ -1225,15 +1345,37 @@ export function renderFullScoreToSvg(
             leftConnector.setContext(ctx).draw();
           }
 
-          const rightConnector = new StaveConnector(topStave, bottomStave);
-          rightConnector.setType(
-            mIdx === totalMeasures - 1 ? StaveConnector.type.BOLD_DOUBLE_RIGHT : StaveConnector.type.SINGLE_RIGHT
-          );
-          rightConnector.setContext(ctx).draw();
-        } catch {
-          // ignore
+            const rightConnector = new StaveConnector(topStave, bottomStave);
+            rightConnector.setType(
+              mIdx === totalMeasures - 1 ? StaveConnector.type.BOLD_DOUBLE_RIGHT : StaveConnector.type.SINGLE_RIGHT
+            );
+            rightConnector.setContext(ctx).draw();
+          } catch {
+            // ignore
+          }
+        }
+
+        // 小節フォーカス・連動スクロール用オーバーレイ要素（総譜全トラックを縦断カバー）
+        if (svgElem) {
+          const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          overlay.setAttribute('class', 'measure-focus-overlay');
+          overlay.setAttribute('data-measure-index', String(mIdx));
+          overlay.setAttribute('data-measure-number', String(mIdx + 1));
+          overlay.setAttribute('x', String(x));
+          overlay.setAttribute('y', String(topPadding - 25));
+          overlay.setAttribute('width', String(staveWidth));
+          overlay.setAttribute('height', String(tracks.length * trackStaveHeight + 35));
+          overlay.setAttribute('rx', '6');
+          overlay.setAttribute('ry', '6');
+          overlay.setAttribute('fill', 'transparent');
+          overlay.setAttribute('stroke', 'transparent');
+          overlay.setAttribute('stroke-width', '2');
+          overlay.style.pointerEvents = 'all';
+          overlay.style.cursor = 'pointer';
+          overlay.style.transition = 'all 0.15s ease-in-out';
+          overlay.setAttribute('title', `第 ${mIdx + 1} 小節 (クリックで選択)`);
+          svgElem.appendChild(overlay);
         }
       }
     }
   }
-}

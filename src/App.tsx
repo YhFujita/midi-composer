@@ -100,11 +100,35 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  // カーソル位置に対応する拍数
+  const cursorBeat = useMemo(() => {
+    return findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
+  }, [parsedScore.timelineItems, cursorPosition]);
+
   // カーソル位置に対応する再生秒数
   const cursorPlaybackSec = useMemo(() => {
-    const beat = findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
-    return audioEngine.calculateBeatToSec(parsedScore, beat);
-  }, [parsedScore, cursorPosition]);
+    return audioEngine.calculateBeatToSec(parsedScore, cursorBeat);
+  }, [parsedScore, cursorBeat]);
+
+  // カーソル位置に対応する小節番号 (0-indexed)
+  const cursorMeasureIndex = useMemo(() => {
+    const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
+    return Math.floor(cursorBeat / beatsPerMeasure);
+  }, [cursorBeat, parsedScore.timeSignature?.numerator]);
+
+  // 楽譜の小節クリックでエディタカーソルを該当小節へジャンプ移動
+  const handleSelectMeasure = useCallback(
+    (measureIndex: number) => {
+      const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
+      const targetBeat = measureIndex * beatsPerMeasure;
+      const items = parsedScore.timelineItems || [];
+      const item = items.find((it) => it.beat >= targetBeat - 0.01) || items[items.length - 1];
+      if (item && editorActionsRef.current?.setPosition) {
+        editorActionsRef.current.setPosition(item.line, item.startColumn);
+      }
+    },
+    [parsedScore]
+  );
 
   // 最初から再生
   const handlePlayFromStart = useCallback(() => {
@@ -489,6 +513,8 @@ export const App: React.FC = () => {
             score={parsedScore}
             currentBeat={currentBeat}
             isPlaying={isPlaying}
+            cursorMeasureIndex={cursorMeasureIndex}
+            onSelectMeasure={handleSelectMeasure}
           />
         </div>
       </div>

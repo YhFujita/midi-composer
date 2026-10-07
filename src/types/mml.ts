@@ -71,6 +71,15 @@ export interface KeySignatureEvent {
   alteredNotes: Record<string, '#' | 'b'>; // 各幹音の変化記号
 }
 
+export interface RehearsalMarkEvent {
+  time: number;        // 拍数 (0, 4.0, ...)
+  text: string;        // 表示記号・テキスト (例: "A", "B", "Intro", "サビ", etc.)
+  measureIndex?: number; // 小節インデックス (0-indexed)
+  trackId?: number;    // トラックID
+  line?: number;       // ソース行番号
+  column?: number;     // ソース列番号
+}
+
 export interface Track {
   id: number;
   name: string;
@@ -80,6 +89,7 @@ export interface Track {
   tempoEvents?: TempoEvent[];
   timeSignatureEvents?: TimeSignatureEvent[];
   keySignatureEvents?: KeySignatureEvent[];
+  rehearsalMarks?: RehearsalMarkEvent[];
   initialTempo?: number;
   initialTimeSignature?: { numerator: number; denominator: number };
   initialKey?: number; // トラック移調量 (半音単位)
@@ -103,7 +113,7 @@ export interface MmlTimelineItem {
   endColumn: number;   // 終了列番号 (1-indexed)
   trackId: number;     // トラックID
   beat: number;        // 4分音符基準の開始拍数
-  type: 'note' | 'rest' | 'track';
+  type: 'note' | 'rest' | 'track' | 'rehearsalMark';
 }
 
 export interface ParsedScore {
@@ -114,6 +124,7 @@ export interface ParsedScore {
   totalDuration: number; // 全体の長さ（拍数）
   masterKeyEvents?: MasterKeyEvent[];
   keySignatureEvents?: KeySignatureEvent[];
+  rehearsalMarks?: RehearsalMarkEvent[];
   initialKeySignature?: string;
   globalKeyShift?: number;
   pedalEvents?: PedalEvent[];

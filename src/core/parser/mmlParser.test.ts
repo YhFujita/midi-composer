@@ -789,6 +789,74 @@ describe('MML Parser', () => {
       expect(notes[2].pitch).toBe('C#4'); // D_4 = C#4
     });
   });
+
+  describe('楽譜構成記号・リハーサルマーク (Rehearsal Marks: 🄰, [A], [Intro] 等)', () => {
+    it('Unicode囲み文字 🄰 や 🄱 をパースしてリハーサルマークに変換できること', () => {
+      const code = '🄰 c4 d4 e4 f4 | 🄱 g4 a4 b4 > c4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      expect(score.rehearsalMarks).toBeDefined();
+      expect(score.rehearsalMarks).toHaveLength(2);
+      expect(score.rehearsalMarks![0].text).toBe('A');
+      expect(score.rehearsalMarks![0].time).toBe(0);
+      expect(score.rehearsalMarks![0].measureIndex).toBe(0);
+
+      expect(score.rehearsalMarks![1].text).toBe('B');
+      expect(score.rehearsalMarks![1].time).toBe(4.0);
+      expect(score.rehearsalMarks![1].measureIndex).toBe(1);
+    });
+
+    it('ブラケット記法 [A], [B], [Intro], [Chorus] をパースできること', () => {
+      const code = '[Intro] c1 | [A] d1 | [Chorus] e1';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      expect(score.rehearsalMarks).toHaveLength(3);
+      expect(score.rehearsalMarks![0].text).toBe('Intro');
+      expect(score.rehearsalMarks![0].time).toBe(0);
+      expect(score.rehearsalMarks![1].text).toBe('A');
+      expect(score.rehearsalMarks![1].time).toBe(4.0);
+      expect(score.rehearsalMarks![2].text).toBe('Chorus');
+      expect(score.rehearsalMarks![2].time).toBe(8.0);
+    });
+
+    it('和音 [ceg]4 はリハーサルマークと誤認されず通常の和音としてパースされること', () => {
+      const code = '[A] [ceg]1 | [B] [fac]1';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      expect(score.rehearsalMarks).toHaveLength(2);
+      expect(score.rehearsalMarks![0].text).toBe('A');
+      expect(score.rehearsalMarks![1].text).toBe('B');
+
+      // 和音が正常にパースされていること
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(6); // 3音 + 3音
+      expect(notes[0].pitch).toBe('C4');
+      expect(notes[3].pitch).toBe('F4');
+    });
+
+    it('明示的コマンド Mark("A") や Section("サビ") をパースできること', () => {
+      const code = 'Mark("A") c1 | Section("サビ") g1';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      expect(score.rehearsalMarks).toHaveLength(2);
+      expect(score.rehearsalMarks![0].text).toBe('A');
+      expect(score.rehearsalMarks![1].text).toBe('サビ');
+    });
+
+    it('findBeatAtCursor がリハーサルマークの位置から正確な拍数を返せること', () => {
+      const code = 'c1\n[A] d1\n[B] e1';
+      const score = parseMML(code);
+
+      // 行2の先頭 [A] の位置 (行2, 列1)
+      expect(findBeatAtCursor(score.timelineItems, 2, 1)).toBe(4.0);
+      // 行3の先頭 [B] の位置 (行3, 列1)
+      expect(findBeatAtCursor(score.timelineItems, 3, 1)).toBe(8.0);
+    });
+  });
 });
 
 
