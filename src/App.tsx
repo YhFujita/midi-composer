@@ -17,6 +17,7 @@ import { openMmlFile, openMidiFile, saveMmlFile, downloadBlob } from './utils/fi
 import { detectCursorContext } from './utils/editorCursor';
 import { PRESET_SONGS } from './constants/presets';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
+import { ErrorBoundary } from './components/Common/ErrorBoundary';
 
 export const App: React.FC = () => {
   // 初期コードはきらきら星プリセット
@@ -105,23 +106,39 @@ export const App: React.FC = () => {
 
   // カーソル位置に対応する拍数
   const cursorBeat = useMemo(() => {
-    return findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
+    try {
+      return findBeatAtCursor(parsedScore.timelineItems, cursorPosition.lineNumber, cursorPosition.column);
+    } catch {
+      return 0;
+    }
   }, [parsedScore.timelineItems, cursorPosition]);
 
   // カーソル位置に対応する再生秒数
   const cursorPlaybackSec = useMemo(() => {
-    return audioEngine.calculateBeatToSec(parsedScore, cursorBeat);
+    try {
+      return audioEngine.calculateBeatToSec(parsedScore, cursorBeat);
+    } catch {
+      return 0;
+    }
   }, [parsedScore, cursorBeat]);
 
   // カーソル位置に対応する小節番号 (0-indexed)
   const cursorMeasureIndex = useMemo(() => {
-    const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
-    return Math.floor(cursorBeat / beatsPerMeasure);
+    try {
+      const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
+      return Math.floor(cursorBeat / beatsPerMeasure);
+    } catch {
+      return 0;
+    }
   }, [cursorBeat, parsedScore.timeSignature?.numerator]);
 
   // カーソル位置のトラック・チャンネル・ドラム判定
   const cursorContext = useMemo(() => {
-    return detectCursorContext(mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore);
+    try {
+      return detectCursorContext(mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore);
+    } catch {
+      return { trackId: 0, channel: 1, instrument: 0, isDrum: false };
+    }
   }, [mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore]);
 
   // カーソルがドラムトラックに入った場合、自動的にバーチャルピアノ鍵盤を下部に表示
@@ -483,17 +500,19 @@ export const App: React.FC = () => {
           }`}
         >
           <div className="flex-1 overflow-hidden">
-            <MmlEditor
-              value={mmlText}
-              onChange={handleMmlChange}
-              errors={parsedScore.errors}
-              onCursorChange={setCursorPosition}
-              selectedProgram={selectedProgram}
-              onSelectProgram={setSelectedProgram}
-              isKeyboardOpen={isKeyboardOpen}
-              onToggleKeyboard={() => setIsKeyboardOpen((prev) => !prev)}
-              editorActionsRef={editorActionsRef}
-            />
+            <ErrorBoundary fallbackTitle="MMLエディタのエラー">
+              <MmlEditor
+                value={mmlText}
+                onChange={handleMmlChange}
+                errors={parsedScore.errors}
+                onCursorChange={setCursorPosition}
+                selectedProgram={selectedProgram}
+                onSelectProgram={setSelectedProgram}
+                isKeyboardOpen={isKeyboardOpen}
+                onToggleKeyboard={() => setIsKeyboardOpen((prev) => !prev)}
+                editorActionsRef={editorActionsRef}
+              />
+            </ErrorBoundary>
           </div>
 
           {/* フッター: エラー・パース状態バー & カーソル位置 & トラック情報 */}
@@ -512,7 +531,7 @@ export const App: React.FC = () => {
                   <span className="text-[11px]">MML 正常 ({parsedScore.tracks.length} トラック, {parsedScore.totalDuration.toFixed(1)} 拍)</span>
                 </div>
                 {cursorContext.isDrum && (
-                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold">
+                  <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold">
                     🥁 ドラム (Ch 10)
                   </span>
                 )}
@@ -532,25 +551,29 @@ export const App: React.FC = () => {
             isHorizontal ? 'w-1/2 h-full' : 'w-full h-1/2'
           } overflow-hidden flex flex-col print:block print:w-full print:h-auto print:overflow-visible`}
         >
-          <SheetMusic
-            score={parsedScore}
-            currentBeat={currentBeat}
-            isPlaying={isPlaying}
-            cursorMeasureIndex={cursorMeasureIndex}
-            onSelectMeasure={handleSelectMeasure}
-          />
+          <ErrorBoundary fallbackTitle="楽譜ビューアのエラー">
+            <SheetMusic
+              score={parsedScore}
+              currentBeat={currentBeat}
+              isPlaying={isPlaying}
+              cursorMeasureIndex={cursorMeasureIndex}
+              onSelectMeasure={handleSelectMeasure}
+            />
+          </ErrorBoundary>
         </div>
       </div>
 
       {/* バーチャルピアノ鍵盤パネル (全幅ドック) */}
-      <PianoKeyboardPanel
-        isOpen={isKeyboardOpen}
-        onClose={() => setIsKeyboardOpen(false)}
-        onInsertText={(text) => editorActionsRef.current?.insertText(text)}
-        onBackspace={() => editorActionsRef.current?.deleteBackward()}
-        currentProgram={selectedProgram}
-        isDrumMode={cursorContext.isDrum}
-      />
+      <ErrorBoundary fallbackTitle="ピアノ鍵盤のエラー">
+        <PianoKeyboardPanel
+          isOpen={isKeyboardOpen}
+          onClose={() => setIsKeyboardOpen(false)}
+          onInsertText={(text) => editorActionsRef.current?.insertText(text)}
+          onBackspace={() => editorActionsRef.current?.deleteBackward()}
+          currentProgram={selectedProgram}
+          isDrumMode={cursorContext.isDrum}
+        />
+      </ErrorBoundary>
 
       {/* MML記法リファレンスモーダル */}
       <MmlGuideModal

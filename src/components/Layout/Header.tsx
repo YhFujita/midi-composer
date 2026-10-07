@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BookOpen, Music, Columns2, Rows2, Music2, Loader2, CheckCircle2 } from 'lucide-react';
 import { soundFontManager, SoundFontState } from '../../core/audio/soundFontManager';
 
@@ -24,6 +24,14 @@ export const Header: React.FC<HeaderProps> = ({
       setSfState(state);
     });
   }, []);
+
+  const soundFontDisplayName = useMemo(() => {
+    const rawName = sfState.currentSoundFont?.name;
+    if (typeof rawName === 'string' && rawName.trim().length > 0) {
+      return rawName.replace(/\s*\([^)]*\)/g, '').trim() || rawName;
+    }
+    return 'TimGM6mb';
+  }, [sfState.currentSoundFont?.name]);
 
   return (
     <header className="no-print flex items-center justify-between px-3 py-1 bg-slate-900 border-b border-slate-800 text-white h-9 sm:h-10 flex-shrink-0 select-none">
@@ -51,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Music2 className="w-3.5 h-3.5 text-indigo-400" />
           <span className="hidden md:inline text-slate-400">音源:</span>
           <span className="max-w-[100px] sm:max-w-[130px] truncate text-slate-200">
-            {sfState.currentSoundFont?.name.replace(/ \(.*\)/, '') || 'TimGM6mb'}
+            {soundFontDisplayName}
           </span>
           {sfState.status === 'ready' ? (
             <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-950" title="SoundFont 準備完了" />

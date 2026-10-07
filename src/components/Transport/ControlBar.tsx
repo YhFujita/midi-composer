@@ -107,8 +107,10 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 }) => {
   const [selectedPreset, setSelectedPreset] = useState<string>('');
 
-  const currentBpm = score.tempoEvents[0]?.bpm || 120;
-  const timeSignatureStr = `${score.timeSignature.numerator}/${score.timeSignature.denominator}`;
+  const currentBpm = score?.tempoEvents?.[0]?.bpm || 120;
+  const num = score?.timeSignature?.numerator ?? 4;
+  const den = score?.timeSignature?.denominator ?? 4;
+  const timeSignatureStr = `${num}/${den}`;
 
   return (
     <div className="no-print flex flex-row items-center justify-between px-3 py-1 bg-slate-950 border-b border-slate-800 text-slate-200 gap-1.5 sm:gap-2 h-9 sm:h-10 flex-shrink-0 overflow-x-auto select-none shadow-sm">
