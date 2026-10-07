@@ -78,7 +78,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
             [/\/\*/, 'comment', '@comment'],
 
             // 楽譜構成記号・リハーサルマーク (🄰, 🄱, [A], [Intro] 等)
-            [/[\u{1F130}-\u{1F149}\u{1F170}-\u{1F18E}\u{24B6}-\u{24E9}\u{2460}-\u{2473}]/u, 'annotation'],
+            // ※Monarch内部でフラグなしnew RegExpが実行されるため、サロゲートペア形式で安全に指定
+            [/(?:\uD83C[\uDD30-\uDD49\uDD70-\uDD8E]|[\u24B6-\u24E9\u2460-\u2473])/, 'annotation'],
             [/\[(?:Intro|Verse|Chorus|Bridge|Outro|Interlude|Ending|Coda|Fine|PreChorus|Pre-Chorus|Hook|Theme|Solo|サビ|イントロ|間奏|エンディング|Aメロ|Bメロ|Cメロ|[A-Z](?:['’]|\d+)?|\d+)\]/i, 'annotation'],
 
             // ペダルコマンド (Pedal, PedalOff, P1, P0, _P, _p)
