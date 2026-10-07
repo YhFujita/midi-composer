@@ -3,6 +3,7 @@ import { X, Search, Volume2, PlusCircle, Music2, Sparkles, RefreshCw } from 'luc
 import {
   INSTRUMENTS,
   INSTRUMENT_CATEGORIES,
+  DRUM_KIT_INSTRUMENT,
 } from '../../constants/instruments';
 import { audioEngine } from '../../core/audio/soundFontPlayer';
 
@@ -31,14 +32,14 @@ export const InstrumentSelectorModal: React.FC<InstrumentSelectorModalProps> = (
 
   // カテゴリ & 検索フィルター
   const filteredInstruments = useMemo(() => {
-    let list = INSTRUMENTS;
+    let list = [...INSTRUMENTS, DRUM_KIT_INSTRUMENT];
 
     // カテゴリフィルター
     if (selectedCategory !== 'all') {
       const cat = INSTRUMENT_CATEGORIES.find((c) => c.id === selectedCategory);
       if (cat) {
         list = list.filter(
-          (inst) => inst.program >= cat.range[0] && inst.program <= cat.range[1]
+          (inst) => (inst.program >= cat.range[0] && inst.program <= cat.range[1]) || (cat.id === 'percussive' && inst.program === 128)
         );
       }
     }
@@ -65,7 +66,13 @@ export const InstrumentSelectorModal: React.FC<InstrumentSelectorModalProps> = (
   const handlePreview = (program: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setActivePreview(program);
-    audioEngine.previewInstrument(program);
+    if (program === 128) {
+      audioEngine.previewNote(36, 300, 0, 110, true);
+      setTimeout(() => audioEngine.previewNote(42, 200, 0, 95, true), 150);
+      setTimeout(() => audioEngine.previewNote(38, 300, 0, 105, true), 300);
+    } else {
+      audioEngine.previewInstrument(program);
+    }
     setTimeout(() => {
       setActivePreview(null);
     }, 1000);

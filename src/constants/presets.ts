@@ -89,5 +89,32 @@ TR(2) Voice(0) v90 o4 l4
 [e g]2. | [d f#]2. |
 [c e]2. | [d f# a]2. |
 `
+  },
+  {
+    id: 'pop_drums',
+    title: 'ポップス・ドラムビート (3パート: 鍵盤/ベース/ドラム)',
+    description: 'エレクトリックピアノ、ベース、8ビートドラムのアンサンブル',
+    mml: `// ポップス・ドラムビート (Pops Drum Groove)
+Tempo(124)
+TimeSignature(4,4)
+
+// Track 1: エレクトリックピアノ (EPiano)
+TR(1) Voice(4) v100 o4 l8
+[c e g b]4. [c e g b]4. [c e g b]4 | [a > c e g <]4. [a > c e g <]4. [a > c e g <]4 |
+[f a > c e <]4. [f a > c e <]4. [f a > c e <]4 | [g b > d f <]4. [g b > d f <]4. [g b > d f <]4 |
+
+// Track 2: エレキベース (Electric Bass)
+TR(2) Voice(33) v105 o2 l8
+c4 c8 c8 c4 c8 c8 | a4 a8 a8 a4 a8 a8 |
+f4 f8 f8 f4 f8 f8 | g4 g8 g8 g4 g8 g8 |
+
+// Track 3: ドラムセット (Drum Kit: Ch 10)
+// o2 c: バスドラム(Kick=36), o2 d: スネア(Snare=38), o2 f#: クローズハイハット(Hi-Hat=42)
+TR(3) CH(10) v100 o2 l8
+[c f#] f# [d f#] f# [c f#] [c f#] [d f#] f# |
+[c f#] f# [d f#] f# [c f#] [c f#] [d f#] f# |
+[c f#] f# [d f#] f# [c f#] [c f#] [d f#] f# |
+[c f#] f# [d f#] f# [c f#] [c f#] [d f#] f# |
+`
   }
 ];

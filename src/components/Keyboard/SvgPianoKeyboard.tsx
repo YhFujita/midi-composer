@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useCallback } from 'react';
+import { getDrumInfo } from '../../constants/drumMap';
 
 export interface SvgPianoKeyboardProps {
   startOctave?: number; // 開始オクターブ (例: 3 -> C3から開始)
@@ -7,6 +8,7 @@ export interface SvgPianoKeyboardProps {
   onNoteDown: (midiNote: number) => void; // 鍵盤押下時ハンドラ
   onNoteUp?: (midiNote: number) => void; // 鍵盤離脱時ハンドラ
   showLabels?: boolean; // 音名ラベルの表示有無
+  isDrumMode?: boolean; // ドラムセットモード (ドラム名ラベル表示)
   whiteKeyWidth?: number; // 白鍵の幅 (px)
   whiteKeyHeight?: number; // 白鍵の高さ (px)
   className?: string;
@@ -44,6 +46,7 @@ export const SvgPianoKeyboard: React.FC<SvgPianoKeyboardProps> = ({
   onNoteDown,
   onNoteUp,
   showLabels = true,
+  isDrumMode = false,
   whiteKeyWidth = 32,
   whiteKeyHeight = 125,
   className = '',
@@ -245,14 +248,21 @@ export const SvgPianoKeyboard: React.FC<SvgPianoKeyboardProps> = ({
         <g id="white-keys">
           {whiteKeys.map((key) => {
             const isActive = activeSet.has(key.midiNote);
+            const drumInfo = isDrumMode ? getDrumInfo(key.midiNote) : undefined;
             return (
               <g
                 key={key.midiNote}
                 onPointerDown={(e) => handleKeyPointerDown(key.midiNote, e)}
                 onPointerEnter={() => handleKeyPointerEnter(key.midiNote)}
                 onPointerLeave={() => handleKeyPointerLeave(key.midiNote)}
-                className="transition-colors duration-75"
+                className="transition-colors duration-75 cursor-pointer"
               >
+                <title>
+                  {drumInfo
+                    ? `${drumInfo.nameJa} (${drumInfo.name}) [MIDI ${key.midiNote}]`
+                    : `${key.pitchName} [MIDI ${key.midiNote}]`}
+                </title>
+
                 {/* 白鍵本体 */}
                 <rect
                   x={key.x}
@@ -277,20 +287,51 @@ export const SvgPianoKeyboard: React.FC<SvgPianoKeyboardProps> = ({
                   strokeLinecap="round"
                 />
 
-                {/* 音名ラベル */}
+                {/* 音名ラベル / ドラムラベル */}
                 {showLabels && (
-                  <text
-                    x={key.x + (whiteKeyWidth - 1) / 2}
-                    y={whiteKeyHeight - 8}
-                    textAnchor="middle"
-                    fontSize={key.isC ? 11 : 9}
-                    fontWeight={key.isC ? 'bold' : '600'}
-                    fill={key.isC ? (isActive ? '#1e3a8a' : '#2563eb') : isActive ? '#1e40af' : '#64748b'}
-                    pointerEvents="none"
-                    fontFamily="monospace"
-                  >
-                    {key.pitchName}
-                  </text>
+                  <>
+                    {isDrumMode && drumInfo ? (
+                      <>
+                        <text
+                          x={key.x + (whiteKeyWidth - 1) / 2}
+                          y={whiteKeyHeight - 16}
+                          textAnchor="middle"
+                          fontSize={8}
+                          fontWeight="700"
+                          fill={isActive ? '#1e3a8a' : '#0f172a'}
+                          pointerEvents="none"
+                          fontFamily="sans-serif"
+                        >
+                          {drumInfo.shortName}
+                        </text>
+                        <text
+                          x={key.x + (whiteKeyWidth - 1) / 2}
+                          y={whiteKeyHeight - 6}
+                          textAnchor="middle"
+                          fontSize={7}
+                          fontWeight="500"
+                          fill={isActive ? '#1d4ed8' : '#64748b'}
+                          pointerEvents="none"
+                          fontFamily="monospace"
+                        >
+                          {key.pitchName}
+                        </text>
+                      </>
+                    ) : (
+                      <text
+                        x={key.x + (whiteKeyWidth - 1) / 2}
+                        y={whiteKeyHeight - 8}
+                        textAnchor="middle"
+                        fontSize={key.isC ? 11 : 9}
+                        fontWeight={key.isC ? 'bold' : '600'}
+                        fill={key.isC ? (isActive ? '#1e3a8a' : '#2563eb') : isActive ? '#1e40af' : '#64748b'}
+                        pointerEvents="none"
+                        fontFamily="monospace"
+                      >
+                        {key.pitchName}
+                      </text>
+                    )}
+                  </>
                 )}
               </g>
             );
@@ -301,14 +342,21 @@ export const SvgPianoKeyboard: React.FC<SvgPianoKeyboardProps> = ({
         <g id="black-keys">
           {blackKeys.map((key) => {
             const isActive = activeSet.has(key.midiNote);
+            const drumInfo = isDrumMode ? getDrumInfo(key.midiNote) : undefined;
             return (
               <g
                 key={key.midiNote}
                 onPointerDown={(e) => handleKeyPointerDown(key.midiNote, e)}
                 onPointerEnter={() => handleKeyPointerEnter(key.midiNote)}
                 onPointerLeave={() => handleKeyPointerLeave(key.midiNote)}
-                className="transition-colors duration-75"
+                className="transition-colors duration-75 cursor-pointer"
               >
+                <title>
+                  {drumInfo
+                    ? `${drumInfo.nameJa} (${drumInfo.name}) [MIDI ${key.midiNote}]`
+                    : `${key.pitchName} [MIDI ${key.midiNote}]`}
+                </title>
+
                 {/* 黒鍵本体 */}
                 <rect
                   x={key.x}
@@ -336,20 +384,37 @@ export const SvgPianoKeyboard: React.FC<SvgPianoKeyboardProps> = ({
                   pointerEvents="none"
                 />
 
-                {/* 黒鍵の音名ラベル */}
+                {/* 黒鍵の音名ラベル / ドラムラベル */}
                 {showLabels && (
-                  <text
-                    x={key.x + blackKeyWidth / 2}
-                    y={blackKeyHeight - 6}
-                    textAnchor="middle"
-                    fontSize={7.5}
-                    fontWeight="600"
-                    fill={isActive ? '#ffffff' : '#94a3b8'}
-                    pointerEvents="none"
-                    fontFamily="monospace"
-                  >
-                    #
-                  </text>
+                  <>
+                    {isDrumMode && drumInfo ? (
+                      <text
+                        x={key.x + blackKeyWidth / 2}
+                        y={blackKeyHeight - 5}
+                        textAnchor="middle"
+                        fontSize={6.5}
+                        fontWeight="700"
+                        fill={isActive ? '#ffffff' : '#f1f5f9'}
+                        pointerEvents="none"
+                        fontFamily="sans-serif"
+                      >
+                        {drumInfo.shortName}
+                      </text>
+                    ) : (
+                      <text
+                        x={key.x + blackKeyWidth / 2}
+                        y={blackKeyHeight - 6}
+                        textAnchor="middle"
+                        fontSize={7.5}
+                        fontWeight="600"
+                        fill={isActive ? '#ffffff' : '#94a3b8'}
+                        pointerEvents="none"
+                        fontFamily="monospace"
+                      >
+                        #
+                      </text>
+                    )}
+                  </>
                 )}
               </g>
             );

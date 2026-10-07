@@ -788,16 +788,158 @@ export class AudioEngine {
   }
 
   /**
-   * ピアノ鍵盤演奏用: 単音のノートオン
+   * フォールバック用のドラム単音合成 (Web Audio API)
    */
-  public noteOn(midiNote: number, velocity = 100, instrument = 0) {
+  private playFallbackDrumNote(ctx: AudioContext, midiNote: number, velocity = 100) {
+    const now = ctx.currentTime;
+    const vel = Math.max(0.01, Math.min(1, velocity / 127));
+
+    // バスドラム (35, 36)
+    if (midiNote === 35 || midiNote === 36) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(35, now + 0.12);
+      gain.gain.setValueAtTime(vel * 0.9, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.26);
+      return;
+    }
+
+    // スネア (38, 40)
+    if (midiNote === 38 || midiNote === 40) {
+      // ノイズ成分
+      const bufferSize = ctx.sampleRate * 0.2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(1000, now);
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(vel * 0.6, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noise.start(now);
+      // トーン成分
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+      oscGain.gain.setValueAtTime(vel * 0.4, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(oscGain);
+      oscGain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.2);
+      return;
+    }
+
+    // ハイハット (42: Closed, 44: Pedal, 46: Open)
+    if (midiNote === 42 || midiNote === 44 || midiNote === 46) {
+      const dur = midiNote === 46 ? 0.35 : 0.08;
+      const bufferSize = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(7000, now);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vel * 0.45, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start(now);
+      return;
+    }
+
+    // シンバル (49, 51, 52, 53, 55, 57, 59)
+    if ([49, 51, 52, 53, 55, 57, 59].includes(midiNote)) {
+      const dur = 0.8;
+      const bufferSize = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(5500, now);
+      filter.Q.setValueAtTime(1.5, now);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vel * 0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start(now);
+      return;
+    }
+
+    // タム (41, 43, 45, 47, 48, 50)
+    if ([41, 43, 45, 47, 48, 50].includes(midiNote)) {
+      const baseFreq = 90 + (midiNote - 41) * 15;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq * 1.4, now);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq, now + 0.12);
+      gain.gain.setValueAtTime(vel * 0.7, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.31);
+      return;
+    }
+
+    // その他パーカッション (ウッドブロック、クラベス等)
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(midiToFreq(midiNote), now);
+    gain.gain.setValueAtTime(vel * 0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.16);
+  }
+
+  /**
+   * ピアノ鍵盤演奏用: 単音のノートオン
+   * @param isDrum ドラムセット(MIDI Channel 10 / パーカッションバンク)で発音するか
+   */
+  public noteOn(midiNote: number, velocity = 100, instrument = 0, isDrum = false) {
     const ctx = this.initAudioContext();
 
     if (this.isSoundFontReady && this.synth) {
-      this.synth.programChange(0, instrument);
-      this.synth.noteOn(0, midiNote, Math.max(1, Math.min(127, velocity)));
+      if (isDrum) {
+        // GMドラムチャンネル (インデックス 9 = MIDI Ch 10)
+        this.synth.noteOn(9, midiNote, Math.max(1, Math.min(127, velocity)));
+      } else {
+        this.synth.programChange(0, instrument);
+        this.synth.noteOn(0, midiNote, Math.max(1, Math.min(127, velocity)));
+      }
     } else {
-      // フォールバック: Web Audio オシレータ
+      if (isDrum) {
+        this.playFallbackDrumNote(ctx, midiNote, velocity);
+        return;
+      }
+      // フォールバック: Web Audio オシレータ (旋律楽器)
       const now = ctx.currentTime;
       // 既存の同音があれば停止
       const existing = this.activeSingleOscillators.get(midiNote);
@@ -843,11 +985,15 @@ export class AudioEngine {
   /**
    * ピアノ鍵盤演奏用: 単音のノートオフ
    */
-  public noteOff(midiNote: number) {
+  public noteOff(midiNote: number, isDrum = false) {
     if (!this.audioCtx) return;
 
     if (this.synth) {
-      this.synth.noteOff(0, midiNote);
+      if (isDrum) {
+        this.synth.noteOff(9, midiNote);
+      } else {
+        this.synth.noteOff(0, midiNote);
+      }
     }
 
     const item = this.activeSingleOscillators.get(midiNote);
@@ -877,17 +1023,17 @@ export class AudioEngine {
   /**
    * ピアノ鍵盤クリック用: 指定ミリ秒後に自動ノートオフする単音プレビュー
    */
-  public previewNote(midiNote: number, durationMs = 600, instrument = 0, velocity = 100) {
+  public previewNote(midiNote: number, durationMs = 600, instrument = 0, velocity = 100, isDrum = false) {
     const existing = this.activePreviewNotes.get(midiNote);
     if (existing?.stopTimer) {
       clearTimeout(existing.stopTimer);
       this.activePreviewNotes.delete(midiNote);
-      this.noteOff(midiNote);
+      this.noteOff(midiNote, isDrum);
     }
 
-    this.noteOn(midiNote, velocity, instrument);
+    this.noteOn(midiNote, velocity, instrument, isDrum);
     const stopTimer = setTimeout(() => {
-      this.noteOff(midiNote);
+      this.noteOff(midiNote, isDrum);
       this.activePreviewNotes.delete(midiNote);
     }, Math.max(100, durationMs));
 

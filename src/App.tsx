@@ -14,6 +14,7 @@ import { convertMidiToMml } from './core/midi/midiToMml';
 import { audioEngine } from './core/audio/soundFontPlayer';
 import { exportToMp3 } from './core/audio/mp3Exporter';
 import { openMmlFile, openMidiFile, saveMmlFile, downloadBlob } from './utils/fileSystem';
+import { detectCursorContext } from './utils/editorCursor';
 import { PRESET_SONGS } from './constants/presets';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 
@@ -37,6 +38,8 @@ export const App: React.FC = () => {
   const [selectedProgram, setSelectedProgram] = useState<number>(0);
   // エディタアクションref (音符挿入・削除用)
   const editorActionsRef = React.useRef<MmlEditorActions | null>(null);
+  // 直前のドラム状態追跡ref (ドラムトラックに入った時に鍵盤を自動オープン)
+  const prevIsDrumRef = React.useRef<boolean>(false);
 
   // レイアウト分割方向 ('horizontal': 左右分割, 'vertical': 上下分割)
   const [layoutOrientation, setLayoutOrientation] = useState<LayoutOrientation>(() => {
@@ -115,6 +118,19 @@ export const App: React.FC = () => {
     const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
     return Math.floor(cursorBeat / beatsPerMeasure);
   }, [cursorBeat, parsedScore.timeSignature?.numerator]);
+
+  // カーソル位置のトラック・チャンネル・ドラム判定
+  const cursorContext = useMemo(() => {
+    return detectCursorContext(mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore);
+  }, [mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore]);
+
+  // カーソルがドラムトラックに入った場合、自動的にバーチャルピアノ鍵盤を下部に表示
+  useEffect(() => {
+    if (cursorContext.isDrum && !prevIsDrumRef.current) {
+      setIsKeyboardOpen(true);
+    }
+    prevIsDrumRef.current = cursorContext.isDrum;
+  }, [cursorContext.isDrum]);
 
   // 楽譜の小節クリックでエディタカーソルを該当小節へジャンプ移動
   const handleSelectMeasure = useCallback(
@@ -480,22 +496,29 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* フッター: エラー・パース状態バー & カーソル位置 */}
-          <div className="px-3 py-1.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs">
+          {/* フッター: エラー・パース状態バー & カーソル位置 & トラック情報 */}
+          <div className="px-3 py-1 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs h-7 flex-shrink-0">
             {parsedScore.errors.length > 0 ? (
               <div className="flex items-center space-x-1.5 text-rose-400">
                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                <span className="truncate">
+                <span className="truncate text-[11px]">
                   エラー: 行 {parsedScore.errors[0].line} - {parsedScore.errors[0].message}
                 </span>
               </div>
             ) : (
-              <div className="flex items-center space-x-1.5 text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>MML 構文正常 ({parsedScore.tracks.length} トラック, 総拍数: {parsedScore.totalDuration.toFixed(1)})</span>
+              <div className="flex items-center space-x-2 text-emerald-400">
+                <div className="flex items-center space-x-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="text-[11px]">MML 正常 ({parsedScore.tracks.length} トラック, {parsedScore.totalDuration.toFixed(1)} 拍)</span>
+                </div>
+                {cursorContext.isDrum && (
+                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold">
+                    🥁 ドラム (Ch 10)
+                  </span>
+                )}
               </div>
             )}
-            <div className="flex items-center space-x-3 text-slate-400 font-mono text-[11px]">
+            <div className="flex items-center space-x-2 text-slate-400 font-mono text-[11px]">
               <span>行 {cursorPosition.lineNumber}, 列 {cursorPosition.column}</span>
               <span className="text-slate-600">|</span>
               <span className="text-slate-500">UTF-8</span>
@@ -526,6 +549,7 @@ export const App: React.FC = () => {
         onInsertText={(text) => editorActionsRef.current?.insertText(text)}
         onBackspace={() => editorActionsRef.current?.deleteBackward()}
         currentProgram={selectedProgram}
+        isDrumMode={cursorContext.isDrum}
       />
 
       {/* MML記法リファレンスモーダル */}

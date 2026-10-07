@@ -200,7 +200,16 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
 
       // 出力テキストの生成
       let baseCode = '';
-      if (format === 'voice-only') {
+      if (program === 128) {
+        if (format === 'voice-only') {
+          baseCode = 'CH(10) Voice(0)';
+        } else if (format === 'with-track') {
+          const tr = trackNumber || 10;
+          baseCode = `TR(${tr}) CH(10) Voice(0) /* ドラムセット */`;
+        } else {
+          baseCode = 'CH(10) Voice(0) /* ドラムセット */';
+        }
+      } else if (format === 'voice-only') {
         baseCode = `Voice(${program})`;
       } else if (format === 'with-track') {
         const tr = trackNumber || 1;

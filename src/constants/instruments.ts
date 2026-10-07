@@ -198,8 +198,20 @@ export const INSTRUMENTS: InstrumentInfo[] = [
   { program: 127, name: 'Gunshot', nameJa: '銃声', abbr: 'Gunshot', abbrJa: '銃声', category: 'Sound Effects', categoryJa: '効果音' },
 ];
 
+export const DRUM_KIT_INSTRUMENT: InstrumentInfo = {
+  program: 128,
+  name: 'Standard Drum Kit',
+  nameJa: 'ドラムセット (GM標準)',
+  abbr: 'Drums',
+  abbrJa: 'ドラム',
+  category: 'Percussive',
+  categoryJa: '打楽器',
+  isFeatured: true,
+};
+
 /** プログラム番号から楽器情報を取得 */
 export function getInstrumentByProgram(program: number): InstrumentInfo {
+  if (program === 128) return DRUM_KIT_INSTRUMENT;
   const found = INSTRUMENTS.find((inst) => inst.program === program);
   return (
     found || {
@@ -215,4 +227,7 @@ export function getInstrumentByProgram(program: number): InstrumentInfo {
 }
 
 /** クイック選択用の代表的な楽器リスト */
-export const POPULAR_INSTRUMENTS: InstrumentInfo[] = INSTRUMENTS.filter((inst) => inst.isFeatured);
+export const POPULAR_INSTRUMENTS: InstrumentInfo[] = [
+  ...INSTRUMENTS.filter((inst) => inst.isFeatured),
+  DRUM_KIT_INSTRUMENT,
+];

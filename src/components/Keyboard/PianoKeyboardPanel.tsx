@@ -23,6 +23,7 @@ export interface PianoKeyboardPanelProps {
   onInsertText: (text: string) => void;
   onBackspace?: () => void;
   currentProgram?: number;
+  isDrumMode?: boolean;
 }
 
 const NOTE_LETTERS = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
@@ -41,6 +42,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
   onInsertText,
   onBackspace,
   currentProgram = 0,
+  isDrumMode = false,
 }) => {
   // モード: 'preview' (音を確かめる) または 'insert' (カーソル位置へ入力)
   const [mode, setMode] = useState<'preview' | 'insert'>('preview');
@@ -51,11 +53,18 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
   const [octaveFormat, setOctaveFormat] = useState<'auto' | 'explicit' | 'note-only'>('auto');
   const [lastInsertedOctave, setLastInsertedOctave] = useState<number>(4);
 
-  // 鍵盤表示設定
-  const [startOctave, setStartOctave] = useState<number>(3); // デフォルト C3〜
-  const [octaveCount, setOctaveCount] = useState<number>(3); // 3オクターブ (C3〜C6)
+  // 鍵盤表示設定: ドラムモード時は C2〜 (MIDI 36〜、キック/スネア/ハイハットの中心)
+  const [startOctave, setStartOctave] = useState<number>(() => (isDrumMode ? 2 : 3));
+  const [octaveCount, setOctaveCount] = useState<number>(3); // 3オクターブ
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [soundOption, setSoundOption] = useState<'current' | 'piano'>('current');
+
+  // ドラムモード切り替え時に開始オクターブをドラム主音域(C2)に自動追従
+  React.useEffect(() => {
+    if (isDrumMode) {
+      setStartOctave(2);
+    }
+  }, [isDrumMode]);
 
   // 現在発音中/押下中のMIDIノート
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
@@ -66,9 +75,9 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
   // 鍵盤押下時ハンドラ
   const handleNoteDown = useCallback(
     (midiNote: number) => {
-      // 1. 発音
-      const inst = soundOption === 'piano' ? 0 : currentProgram;
-      audioEngine.noteOn(midiNote, 105, inst);
+      // 1. 発音 (ドラムモード時は Channel 10 ドラムセットで発音)
+      const inst = soundOption === 'piano' && !isDrumMode ? 0 : currentProgram;
+      audioEngine.noteOn(midiNote, 105, inst, isDrumMode);
       setActiveNotes((prev) => (prev.includes(midiNote) ? prev : [...prev, midiNote]));
 
       // 2. 入力モードの場合はエディタへMML挿入
@@ -105,10 +114,13 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
   );
 
   // 鍵盤離脱時ハンドラ
-  const handleNoteUp = useCallback((midiNote: number) => {
-    audioEngine.noteOff(midiNote);
-    setActiveNotes((prev) => prev.filter((n) => n !== midiNote));
-  }, []);
+  const handleNoteUp = useCallback(
+    (midiNote: number) => {
+      audioEngine.noteOff(midiNote, isDrumMode);
+      setActiveNotes((prev) => prev.filter((n) => n !== midiNote));
+    },
+    [isDrumMode]
+  );
 
   // 休符挿入
   const handleInsertRest = useCallback(() => {
@@ -130,22 +142,32 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
     >
       {/* 上部コントロールバー */}
       <div
-        className="flex flex-wrap items-center justify-between px-3 py-1.5 border-b border-slate-200 bg-slate-50 gap-y-1.5"
+        className="flex flex-wrap items-center justify-between px-3 py-1 border-b border-slate-200 bg-slate-50 gap-y-1"
         style={{ backgroundColor: '#f8fafc' }}
       >
-        {/* 左側: モード切替 & タイトル */}
+        {/* 左側: モード切替 & タイトル & ドラムバッジ */}
         <div className="flex items-center space-x-2 flex-wrap">
           <div className="flex items-center space-x-1.5 font-bold text-xs text-slate-900 mr-1">
             <span className="text-base leading-none">🎹</span>
             <span className="hidden sm:inline">ピアノ鍵盤</span>
           </div>
 
+          {/* ドラムモードバッジ */}
+          {isDrumMode && (
+            <span
+              className="flex items-center space-x-1 text-[11px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md shadow-xs animate-in fade-in"
+              title="ドラムセット音源 (MIDI Channel 10) が選択されています。鍵盤をクリックすると打楽器音が鳴ります。"
+            >
+              <span>🥁 ドラムセット (Ch 10)</span>
+            </span>
+          )}
+
           {/* モード切替セグメントボタン */}
           <div className="flex items-center bg-slate-200 p-0.5 rounded-lg border border-slate-300 shadow-inner">
             <button
               type="button"
               onClick={() => setMode('preview')}
-              className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+              className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-bold transition-all ${
                 mode === 'preview'
                   ? 'bg-white text-blue-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -158,7 +180,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
             <button
               type="button"
               onClick={() => setMode('insert')}
-              className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+              className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-bold transition-all ${
                 mode === 'insert'
                   ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -267,17 +289,21 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
 
         {/* 右側: オクターブ移動 & 音色 & 閉じる */}
         <div className="flex items-center space-x-1.5 ml-auto">
-          {/* 音色選択 (選択中楽器 or 常にピアノ) */}
+          {/* 音色選択 */}
           <div className="hidden md:flex items-center space-x-1 text-xs">
             <span className="text-[11px] text-slate-500 font-semibold">音色:</span>
             <select
               value={soundOption}
               onChange={(e) => setSoundOption(e.target.value as any)}
-              className="bg-white border border-slate-300 text-slate-900 text-xs rounded px-1.5 py-0.5 font-medium outline-none shadow-xs max-w-[130px] truncate"
+              className="bg-white border border-slate-300 text-slate-900 text-xs rounded px-1.5 py-0.5 font-medium outline-none shadow-xs max-w-[140px] truncate"
               style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
               title="鍵盤を押したときの発音音色"
             >
-              <option value="current">連動 (#{currentProgram} {currentInst.nameJa})</option>
+              {isDrumMode ? (
+                <option value="current">🥁 ドラムセット (Ch 10)</option>
+              ) : (
+                <option value="current">連動 (#{currentProgram} {currentInst.nameJa})</option>
+              )}
               <option value="piano">ピアノ (#0 Grand Piano)</option>
             </select>
           </div>
@@ -311,12 +337,12 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
           <button
             type="button"
             onClick={() => setShowLabels((prev) => !prev)}
-            className={`p-1.5 rounded-lg border transition-colors ${
+            className={`p-1 rounded-lg border transition-colors ${
               showLabels
                 ? 'bg-blue-50 border-blue-300 text-blue-600'
                 : 'bg-white border-slate-300 text-slate-400 hover:text-slate-700'
             }`}
-            title={showLabels ? '音名ラベルを非表示' : '音名ラベルを表示'}
+            title={showLabels ? 'ラベルを非表示' : 'ラベルを表示'}
           >
             {showLabels ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </button>
@@ -325,7 +351,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors ml-1"
+            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors ml-1"
             title="ピアノ鍵盤を閉じる"
           >
             <X className="w-4 h-4" />
@@ -335,7 +361,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
 
       {/* SVG ピアノ鍵盤描画エリア */}
       <div
-        className="px-2 py-2 flex justify-center items-center overflow-x-auto bg-gradient-to-b from-slate-100 to-slate-200/80"
+        className="px-2 py-1.5 flex justify-center items-center overflow-x-auto bg-gradient-to-b from-slate-100 to-slate-200/80"
         style={{ backgroundColor: '#f1f5f9' }}
       >
         <SvgPianoKeyboard
@@ -345,8 +371,9 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
           onNoteDown={handleNoteDown}
           onNoteUp={handleNoteUp}
           showLabels={showLabels}
-          whiteKeyWidth={32}
-          whiteKeyHeight={115}
+          isDrumMode={isDrumMode}
+          whiteKeyWidth={30}
+          whiteKeyHeight={100}
           className="mx-auto"
         />
       </div>
