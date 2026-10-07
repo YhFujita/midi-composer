@@ -178,20 +178,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               </option>
               <optgroup label="長調 (シャープ系 #)">
                 <option value="Key C /* ハ長調 (#/♭なし) */">Key C (ハ長調: 記号なし)</option>
-                <option value="Key G /* ト長調 (#1) */">Key G (ト長調: #1 [F#])</option>
-                <option value="Key D /* ニ長調 (#2) */">Key D (ニ長調: #2 [F#,C#])</option>
-                <option value="Key A /* イ長調 (#3) */">Key A (イ長調: #3 [F#,C#,G#])</option>
-                <option value="Key E /* ホ長調 (#4) */">Key E (ホ長調: #4 [F#,C#,G#,D#])</option>
-                <option value="Key B /* ロ長調 (#5) */">Key B (ロ長調: #5 [F#,C#,G#,D#,A#])</option>
-                <option value="Key F# /* 嬰ヘ長調 (#6) */">Key F# (嬰ヘ長調: #6)</option>
+                <option value="Key G /* ト長調 (#1 [F#]) */">Key G (ト長調: #1 [F#])</option>
+                <option value="Key D /* ニ長調 (#2 [F#,C#]) */">Key D (ニ長調: #2 [F#,C#])</option>
+                <option value="Key A /* イ長調 (#3 [F#,C#,G#]) */">Key A (イ長調: #3 [F#,C#,G#])</option>
+                <option value="Key E /* ホ長調 (#4 [F#,C#,G#,D#]) */">Key E (ホ長調: #4 [F#,C#,G#,D#])</option>
+                <option value="Key B /* ロ長調 (#5 [F#,C#,G#,D#,A#]) */">Key B (ロ長調: #5 [fcgda])</option>
+                <option value="Key F# /* 嬰ヘ長調 (#6 [fcgdae]: e入力で実音f) */">Key F# (嬰ヘ長調: #6 [fcgdae: e→f])</option>
+                <option value="Key C# /* 嬰ハ長調 (#7 [fcgdaeb]: b入力で実音c) */">Key C# (嬰ハ長調: #7 [fcgdaeb: b→c])</option>
+                <option value="{+fcgdae} /* 嬰ヘ長調 (音名直接指定: #6 [fcgdae]) */">&#123;+fcgdae&#125; (#6直接指定 [fcgdae])</option>
               </optgroup>
               <optgroup label="長調 (フラット系 ♭)">
-                <option value="Key F /* ヘ長調 (♭1) */">Key F (ヘ長調: ♭1 [Bb])</option>
-                <option value="Key Bb /* 変ロ長調 (♭2) */">Key Bb (変ロ長調: ♭2 [Bb,Eb])</option>
-                <option value="Key Eb /* 変ホ長調 (♭3) */">Key Eb (変ホ長調: ♭3 [Bb,Eb,Ab])</option>
-                <option value="Key Ab /* 変イ長調 (♭4) */">Key Ab (変イ長調: ♭4)</option>
-                <option value="Key Db /* 変ニ長調 (♭5) */">Key Db (変ニ長調: ♭5)</option>
-                <option value="Key Gb /* 変ト長調 (♭6) */">Key Gb (変ト長調: ♭6)</option>
+                <option value="Key F /* ヘ長調 (♭1 [Bb]) */">Key F (ヘ長調: ♭1 [Bb])</option>
+                <option value="Key Bb /* 変ロ長調 (♭2 [Bb,Eb]) */">Key Bb (変ロ長調: ♭2 [Bb,Eb])</option>
+                <option value="Key Eb /* 変ホ長調 (♭3 [Bb,Eb,Ab]) */">Key Eb (変ホ長調: ♭3 [Bb,Eb,Ab])</option>
+                <option value="Key Ab /* 変イ長調 (♭4 [Bb,Eb,Ab,Db]) */">Key Ab (変イ長調: ♭4 [bead])</option>
+                <option value="Key Db /* 変ニ長調 (♭5 [Bb,Eb,Ab,Db,Gb]) */">Key Db (変ニ長調: ♭5 [beadg])</option>
+                <option value="Key Gb /* 変ト長調 (♭6 [beadgc]: c入力で実音b) */">Key Gb (変ト長調: ♭6 [beadgc: c→b])</option>
+                <option value="{-beadgc} /* 変ト長調 (音名直接指定: ♭6 [beadgc]) */">&#123;-beadgc&#125; (♭6直接指定 [beadgc])</option>
               </optgroup>
               <optgroup label="短調 (Minor Keys)">
                 <option value="Key Am /* イ短調 */">Key Am (イ短調: 記号なし)</option>
@@ -199,12 +202,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <option value="Key Bm /* ロ短調 (#2) */">Key Bm (ロ短調: #2)</option>
                 <option value="Key F#m /* 嬰ヘ短調 (#3) */">Key F#m (嬰ヘ短調: #3)</option>
                 <option value="Key C#m /* 嬰ハ短調 (#4) */">Key C#m (嬰ハ短調: #4)</option>
+                <option value="Key G#m /* 嬰ト短調 (#5 [fcgda]) */">Key G#m (嬰ト短調: #5 [fcgda])</option>
+                <option value="Key D#m /* 嬰ニ短調 (#6 [fcgdae]: e入力で実音f) */">Key D#m (嬰ニ短調: #6 [fcgdae: e→f])</option>
                 <option value="Key Dm /* ニ短調 (♭1) */">Key Dm (ニ短調: ♭1)</option>
                 <option value="Key Gm /* ト短調 (♭2) */">Key Gm (ト短調: ♭2)</option>
                 <option value="Key Cm /* ハ短調 (♭3) */">Key Cm (ハ短調: ♭3)</option>
+                <option value="Key Fm /* ヘ短調 (♭4) */">Key Fm (ヘ短調: ♭4)</option>
+                <option value="Key Bbm /* 変ロ短調 (♭5) */">Key Bbm (変ロ短調: ♭5)</option>
+                <option value="Key Ebm /* 変ホ短調 (♭6 [beadgc]: c入力で実音b) */">Key Ebm (変ホ短調: ♭6 [beadgc: c→b])</option>
               </optgroup>
               <optgroup label="調号下の臨時記号例">
                 <option value="f= /* Fナチュラル(白鍵) */">f= (調号下のナチュラル例)</option>
+                <option value="e= /* Eナチュラル(白鍵) */">e= (#6調下のEナチュラル例)</option>
               </optgroup>
             </select>
           </div>

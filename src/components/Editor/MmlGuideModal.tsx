@@ -130,11 +130,13 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
-                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Key E / Key F# / Key Bb / Key Em / KeySignature("E")</code>
+                <code className="text-emerald-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 inline-block">Key E / Key F# / Key +fcgdae / &#123;+fcgdae&#125; / Key Bb / Key Em</code>
                 <p className="text-slate-700 mt-1.5 font-medium">
                   🎼 <strong>調号 (Key Signature) の指定</strong>: 楽曲の調を指定します。五線譜の先頭に調号（#や♭）が描画され、MML上で単に <code className="bg-white px-1 py-0.2 rounded border border-slate-300">f</code> や <code className="bg-white px-1 py-0.2 rounded border border-slate-300">g</code> と書くだけで自動的に調号に従ったシャープ・フラット音として発音されます。
                   <br />
-                  曲の途中で何度記述しても、その都度転調した新しい調号が楽譜に反映されます。調号下でナチュラル（白鍵）を鳴らしたい場合は <code className="bg-white px-1 py-0.2 rounded border border-slate-300">f=</code> または <code className="bg-white px-1 py-0.2 rounded border border-slate-300">fn</code> と記述します。
+                  💡 <strong>#が6つ付く調号 (fcgdae)</strong>: <code className="bg-white px-1 py-0.2 rounded border border-slate-300">Key F#</code> や直接指定 <code className="bg-white px-1 py-0.2 rounded border border-slate-300">&#123;+fcgdae&#125;</code> では、F, C, G, D, A, E に#が付きます。このとき <code className="bg-white px-1 py-0.2 rounded border border-slate-300">e</code> を入力すると、五線譜の第1線(E)に音符が配置され、調号のE#効果により自動的に実音 <strong>F (ファ)</strong> として演奏されます。
+                  <br />
+                  曲の途中で何度記述しても、その都度転調した新しい調号が楽譜に反映されます。調号下でナチュラル（白鍵）を鳴らしたい場合は <code className="bg-white px-1 py-0.2 rounded border border-slate-300">f=</code>, <code className="bg-white px-1 py-0.2 rounded border border-slate-300">fn</code>, <code className="bg-white px-1 py-0.2 rounded border border-slate-300">e=</code> と記述します。
                 </p>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseKeySignature, getKeyAccidentalForNote } from '../../utils/keySignature';
 import { parseMML } from './mmlParser';
+import { createVexNotesForMeasure } from '../score/vexflowAdapter';
 
 describe('Key Signature (調号) ユーティリティ', () => {
   it('主要な長調の調号を正しく解析できる', () => {
@@ -200,5 +201,78 @@ describe('MML パーサーにおける調号機能と自動音高適用', () => 
     expect(tC?.isKeyAltered).toBe(true);
     expect(tD?.pitch).toBe('D#4');
     expect(tD?.isKeyAltered).toBe(true);
+  });
+
+  it('#が6つ付く調号 (fcgdae) を音名直接指定や波括弧でパースでき、eを入力したら実音fになる', () => {
+    // 1. parseKeySignature での音名列挙判定
+    const keyByFc = parseKeySignature('fcgdae');
+    expect(keyByFc?.name).toBe('F#');
+    expect(keyByFc?.accidentalsCount).toBe(6);
+    expect(keyByFc?.alteredNotes).toEqual({ F: '#', C: '#', G: '#', D: '#', A: '#', E: '#' });
+
+    const keyByPlus = parseKeySignature('+fcgdae');
+    expect(keyByPlus?.name).toBe('F#');
+    expect(keyByPlus?.accidentalsCount).toBe(6);
+
+    const keyByBrace = parseKeySignature('{+fcgdae}');
+    expect(keyByBrace?.name).toBe('F#');
+    expect(keyByBrace?.accidentalsCount).toBe(6);
+
+    // フラット6つの音名列挙 (beadgc)
+    const keyFlat6 = parseKeySignature('beadgc');
+    expect(keyFlat6?.name).toBe('Gb');
+    expect(keyFlat6?.accidentalsCount).toBe(-6);
+
+    // 2. MML パーサーでの直接指定と e入力 -> 実音f の動作検証
+    // Key +fcgdae 設定下で o4 e4 f4 を入力
+    const mml = `
+      Key +fcgdae
+      o4 e4 f4 e=4
+    `;
+    const score = parseMML(mml);
+    const notes = score.tracks[0].notes;
+
+    expect(score.initialKeySignature).toBe('F#');
+    expect(notes.length).toBe(3);
+
+    // e4 -> 調号により E#4 となり、実音は F4 (MIDI 65)
+    expect(notes[0].pitch).toBe('F4');
+    expect(notes[0].midiNote).toBe(65);
+    expect(notes[0].originalPitch).toBe('E#4');
+    expect(notes[0].isKeyAltered).toBe(true);
+    expect(notes[0].accidentalType).toBeUndefined();
+
+    // f4 -> 調号により F#4 となり、実音は F#4 (MIDI 66)
+    expect(notes[1].pitch).toBe('F#4');
+    expect(notes[1].midiNote).toBe(66);
+    expect(notes[1].originalPitch).toBe('F#4');
+    expect(notes[1].isKeyAltered).toBe(true);
+
+    // e=4 -> ナチュラル記号付きで実音 E4 (MIDI 64)
+    expect(notes[2].pitch).toBe('E4');
+    expect(notes[2].midiNote).toBe(64);
+    expect(notes[2].originalPitch).toBe('E4');
+    expect(notes[2].accidentalType).toBe('n');
+
+    // 3. 波括弧構文 {+fcgdae} も同様にパースされることの検証
+    const mmlBrace = `
+      {+fcgdae}
+      o4 e4
+    `;
+    const scoreBrace = parseMML(mmlBrace);
+    expect(scoreBrace.initialKeySignature).toBe('F#');
+    expect(scoreBrace.tracks[0].notes[0].pitch).toBe('F4');
+    expect(scoreBrace.tracks[0].notes[0].midiNote).toBe(65);
+
+    // 4. 五線譜描画において、調号下の e4 (E#4) がミ(e/4)の位置に、f4 (F#4) がファ(f/4)の位置に正しく配置されることの検証
+    const vexOutput = createVexNotesForMeasure(notes, 0, 4, 'treble');
+    const noteItems = vexOutput.items.filter((it) => !it.isRest);
+    expect(noteItems.length).toBe(3);
+    // 最初の音 e4 (実音 F4) は五線譜上 e/4 に置かれる
+    expect(noteItems[0].staveNote.getKeys()).toEqual(['e/4']);
+    // 次の音 f4 (実音 F#4) は五線譜上 f/4 に置かれる
+    expect(noteItems[1].staveNote.getKeys()).toEqual(['f/4']);
+    // ナチュラル e=4 は五線譜上 e/4 に置かれる
+    expect(noteItems[2].staveNote.getKeys()).toEqual(['e/4']);
   });
 });

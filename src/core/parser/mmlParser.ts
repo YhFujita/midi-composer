@@ -626,44 +626,64 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       }
 
       // 5.0 調号（Key Signature）設定:
-      // A. 明示的コマンド: KeySignature("E"), KeySignature(E), KeySignature = E, KeySignature E, KeySig("F#"), KeySig Bb 等
-      // B. Keyコマンドで引数が調名文字列の場合: Key("E"), Key(E), Key = E, Key E, Key F#, Key Bb, Key Em 等
+      // A. 波括弧による調号指定: {+fcgdae}, {fcgdae}, {-beadgc} 等
+      // B. 明示的コマンド: KeySignature("E"), KeySignature(E), KeySignature = E, KeySignature E, KeySig("F#"), KeySig Bb, KeySignature("+fcgdae") 等
+      // C. Keyコマンドで引数が調名文字列または音名列挙の場合: Key("E"), Key(E), Key = E, Key E, Key F#, Key Bb, Key Em, Key fcgdae, Key +fcgdae 等
       // ※ 数値（Key(2), Key(-1), Key=1 等）はトラック移調（5.2）として処理され、完全に分離・競合回避されます。
-      const keySigMatch = remaining.match(/^(?:Key(?:Signature|Sig)(?:\s*\(\s*["']?([A-Ga-g][#\+\-b_]?(?:m|min|minor|maj|major)?)["']?\s*\)|(?:\s*=\s*|\s+)["']?([A-Ga-g][#\+\-b_]?(?:m|min|minor|maj|major)?)["']?)|Key(?:\s*\(\s*["']?([A-Ga-g][#\+\-b_]?(?:m|min|minor|maj|major)?)["']?\s*\)|(?:\s*=\s*|\s+)["']?([A-Ga-g][#\+\-b_]?(?:m|min|minor|maj|major)?)["']?))/i);
-      if (keySigMatch) {
-        const rawKeyStr = keySigMatch[1] ?? keySigMatch[2] ?? keySigMatch[3] ?? keySigMatch[4];
-        const keyInfo = parseKeySignature(rawKeyStr);
-        if (keyInfo) {
-          currentTrack.keySignature = { ...keyInfo };
-          if (currentTrack.initialKeySignature === undefined && currentTrack.currentTime === 0) {
-            currentTrack.initialKeySignature = keyInfo.name;
-          }
-          if (currentTrack.id === 0 && currentTrack.currentTime === 0) {
-            defaultScoreKey = { ...keyInfo };
-          }
-          const kEvent: KeySignatureEvent = {
-            time: currentTrack.currentTime,
-            key: keyInfo.name,
-            vexKey: keyInfo.vexKey,
-            sharpsFlats: keyInfo.accidentalsCount,
-            alteredNotes: { ...keyInfo.alteredNotes },
-          };
-          currentTrack.keySignatureEvents.push(kEvent);
+      const applyKeySignature = (keyInfo: KeySignatureInfo) => {
+        currentTrack.keySignature = { ...keyInfo };
+        if (currentTrack.initialKeySignature === undefined && currentTrack.currentTime === 0) {
+          currentTrack.initialKeySignature = keyInfo.name;
+        }
+        if (currentTrack.id === 0 && currentTrack.currentTime === 0) {
+          defaultScoreKey = { ...keyInfo };
+        }
+        const kEvent: KeySignatureEvent = {
+          time: currentTrack.currentTime,
+          key: keyInfo.name,
+          vexKey: keyInfo.vexKey,
+          sharpsFlats: keyInfo.accidentalsCount,
+          alteredNotes: { ...keyInfo.alteredNotes },
+        };
+        currentTrack.keySignatureEvents.push(kEvent);
 
-          // 楽曲全体の調号タイムラインにも記録
-          const existing = scoreKeySignatureEvents.find((ev) => ev.time === currentTrack.currentTime);
-          if (existing) {
-            existing.key = keyInfo.name;
-            existing.vexKey = keyInfo.vexKey;
-            existing.sharpsFlats = keyInfo.accidentalsCount;
-            existing.alteredNotes = { ...keyInfo.alteredNotes };
-          } else {
-            scoreKeySignatureEvents.push({ ...kEvent });
-            scoreKeySignatureEvents.sort((a, b) => a.time - b.time);
+        // 楽曲全体の調号タイムラインにも記録
+        const existing = scoreKeySignatureEvents.find((ev) => ev.time === currentTrack.currentTime);
+        if (existing) {
+          existing.key = keyInfo.name;
+          existing.vexKey = keyInfo.vexKey;
+          existing.sharpsFlats = keyInfo.accidentalsCount;
+          existing.alteredNotes = { ...keyInfo.alteredNotes };
+        } else {
+          scoreKeySignatureEvents.push({ ...kEvent });
+          scoreKeySignatureEvents.sort((a, b) => a.time - b.time);
+        }
+      };
+
+      // 波括弧による調号指定判定
+      const braceKeyMatch = remaining.match(/^\{\s*([+\-#_]?[a-gA-G]{1,7})\s*\}/i);
+      if (braceKeyMatch) {
+        const keyInfo = parseKeySignature(braceKeyMatch[1]);
+        if (keyInfo) {
+          applyKeySignature(keyInfo);
+          col += braceKeyMatch[0].length;
+          continue;
+        }
+      }
+
+      // KeySignature / KeySig / Key コマンド判定
+      const keySigMatch = remaining.match(/^(?:Key(?:Signature|Sig)(?:\s*\(\s*["']?([^)"']+)["']?\s*\)|(?:\s*=\s*|\s+)["']?([^,\s;]+)["']?)|Key(?:\s*\(\s*["']?([^)"']+)["']?\s*\)|(?:\s*=\s*|\s+)["']?([^,\s;]+)["']?))/i);
+      if (keySigMatch) {
+        const rawKeyStr = (keySigMatch[1] ?? keySigMatch[2] ?? keySigMatch[3] ?? keySigMatch[4] ?? '').trim();
+        // 純粋な数値の場合はトラック移調（5.2）として処理するためスキップ
+        if (!/^[+-]?\d+$/.test(rawKeyStr)) {
+          const keyInfo = parseKeySignature(rawKeyStr);
+          if (keyInfo) {
+            applyKeySignature(keyInfo);
+            col += keySigMatch[0].length;
+            continue;
           }
         }
-        col += keySigMatch[0].length;
-        continue;
       }
 
       // 5.1 全体移調 (MasterKey / MasterTranspose): MasterKey(-1), MasterKey(2), MasterKey = -1, MasterKey-1 等

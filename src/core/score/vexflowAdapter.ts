@@ -257,7 +257,7 @@ export interface VexMeasureOutput {
 /**
  * 1小節分の音符リストから VexFlow の StaveNote 配列およびマッピング情報を生成
  */
-function createVexNotesForMeasure(
+export function createVexNotesForMeasure(
   notes: NoteEvent[],
   measureIndex: number,
   beatsPerMeasure: number,
@@ -339,15 +339,18 @@ function createVexNotesForMeasure(
 
     noteGroup.forEach((n, kIdx) => {
       // 調号によって変化した音（isKeyAltered = true）の場合:
-      // 楽譜上は調号がすでに効いているため、臨時記号（#や♭）は付けずに幹音位置として描画する
+      // 楽譜上は調号がすでに効いているため、臨時記号（#や♭）は付けずに、入力された元の幹音位置として描画する
       if (n.isKeyAltered) {
-        const match = n.pitch.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
+        // E#4 (実音F4) や Cb4 (実音B3) 等の場合は調号前の幹音位置 ('e/4', 'c/4') に描画するため originalPitch を優先
+        const pitchSource = n.originalPitch || n.pitch;
+        const match = pitchSource.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
         const letter = match ? match[1].toLowerCase() : 'c';
         const oct = match ? match[2] : '4';
         keys.push(`${letter}/${oct}`);
       } else if (n.accidentalType === 'n') {
         // 明示的ナチュラル
-        const match = n.pitch.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
+        const pitchSource = n.originalPitch || n.pitch;
+        const match = pitchSource.trim().match(/^([A-Ga-g])(?:[#\+\-_b]?)(-?\d+)$/);
         const letter = match ? match[1].toLowerCase() : 'c';
         const oct = match ? match[2] : '4';
         keys.push(`${letter}/${oct}`);

@@ -97,19 +97,65 @@ const KEY_DEFINITIONS: Record<string, { standardName: string; vexKey: string; is
   'abm': { standardName: 'Abm', vexKey: 'Abm', isMinor: true, count: -7 },
   'a-m': { standardName: 'Abm', vexKey: 'Abm', isMinor: true, count: -7 },
   'a_m': { standardName: 'Abm', vexKey: 'Abm', isMinor: true, count: -7 },
+
+  // 音名列挙によるシャープ系調号エイリアス (fcgdae 等)
+  '+f': { standardName: 'G', vexKey: 'G', isMinor: false, count: 1 },
+  '+fc': { standardName: 'D', vexKey: 'D', isMinor: false, count: 2 },
+  '+fcg': { standardName: 'A', vexKey: 'A', isMinor: false, count: 3 },
+  '+fcgd': { standardName: 'E', vexKey: 'E', isMinor: false, count: 4 },
+  '+fcgda': { standardName: 'B', vexKey: 'B', isMinor: false, count: 5 },
+  '+fcgdae': { standardName: 'F#', vexKey: 'F#', isMinor: false, count: 6 },
+  '+fcgdaeb': { standardName: 'C#', vexKey: 'C#', isMinor: false, count: 7 },
+  'fc': { standardName: 'D', vexKey: 'D', isMinor: false, count: 2 },
+  'fcg': { standardName: 'A', vexKey: 'A', isMinor: false, count: 3 },
+  'fcgd': { standardName: 'E', vexKey: 'E', isMinor: false, count: 4 },
+  'fcgda': { standardName: 'B', vexKey: 'B', isMinor: false, count: 5 },
+  'fcgdae': { standardName: 'F#', vexKey: 'F#', isMinor: false, count: 6 },
+  'fcgdaeb': { standardName: 'C#', vexKey: 'C#', isMinor: false, count: 7 },
+
+  // 音名列挙によるフラット系調号エイリアス (beadgc 等)
+  '-b': { standardName: 'F', vexKey: 'F', isMinor: false, count: -1 },
+  '-be': { standardName: 'Bb', vexKey: 'Bb', isMinor: false, count: -2 },
+  '-bea': { standardName: 'Eb', vexKey: 'Eb', isMinor: false, count: -3 },
+  '-bead': { standardName: 'Ab', vexKey: 'Ab', isMinor: false, count: -4 },
+  '-beadg': { standardName: 'Db', vexKey: 'Db', isMinor: false, count: -5 },
+  '-beadgc': { standardName: 'Gb', vexKey: 'Gb', isMinor: false, count: -6 },
+  '-beadgcf': { standardName: 'Cb', vexKey: 'Cb', isMinor: false, count: -7 },
+  'be': { standardName: 'Bb', vexKey: 'Bb', isMinor: false, count: -2 },
+  'bea': { standardName: 'Eb', vexKey: 'Eb', isMinor: false, count: -3 },
+  'bead': { standardName: 'Ab', vexKey: 'Ab', isMinor: false, count: -4 },
+  'beadg': { standardName: 'Db', vexKey: 'Db', isMinor: false, count: -5 },
+  'beadgc': { standardName: 'Gb', vexKey: 'Gb', isMinor: false, count: -6 },
+  'beadgcf': { standardName: 'Cb', vexKey: 'Cb', isMinor: false, count: -7 },
 };
 
 /**
- * 入力された調名文字列（例: "E", "Key E", "F#", "Bb", "E minor", "G major" 等）を解析し、
+ * 入力された調名文字列（例: "E", "Key E", "F#", "Bb", "E minor", "G major", "+fcgdae", "fcgdae" 等）を解析し、
  * 調号情報を取得する。該当しない場合は null を返す。
  */
 export function parseKeySignature(input: string): KeySignatureInfo | null {
   if (!input || typeof input !== 'string') return null;
 
-  // 余分なプレフィックスや空白、括弧、引用符等を除去
+  // 余分なプレフィックスや空白、波括弧、角括弧、丸括弧、引用符等を除去
   let clean = input.trim();
+  clean = clean.replace(/^[{\[\(（"'「]+|[}\]\)）"'」]+$/g, '').trim();
   clean = clean.replace(/^key(?:\s*signature|\s*sig)?\s*[:=]?\s*/i, '');
-  clean = clean.replace(/^[("'「]+|[)"'」]+$/g, '').trim();
+  clean = clean.replace(/^[{\[\(（"'「]+|[}\]\)）"'」]+$/g, '').trim();
+
+  // "#" を "+"、"_" を "-" に正規化
+  let normalized = clean.toLowerCase().replace(/#/g, '+').replace(/_/g, '-');
+
+  // 直接テーブル引き (音名列挙 "+fcgdae", "fcgdae" 等も含む)
+  if (KEY_DEFINITIONS[normalized]) {
+    const def = KEY_DEFINITIONS[normalized];
+    return {
+      name: def.standardName,
+      vexKey: def.vexKey,
+      isMinor: def.isMinor,
+      accidentalsCount: def.count,
+      alteredNotes: createAlteredMap(def.count),
+    };
+  }
 
   // "major", "maj", "minor", "min", "m" の正規化
   let isMinor = false;
@@ -129,24 +175,69 @@ export function parseKeySignature(input: string): KeySignatureInfo | null {
 
   // 音名部分の抽出: 例 "F#", "Bb", "C"
   const m = clean.match(/^([a-gA-G])([#\+\-b_]?)$/);
-  if (!m) return null;
+  if (m) {
+    const letter = m[1].toLowerCase();
+    let acc = m[2] || '';
+    if (acc === '+') acc = '#';
+    if (acc === '-' || acc === '_') acc = 'b';
 
-  const letter = m[1].toLowerCase();
-  let acc = m[2] || '';
-  if (acc === '+') acc = '#';
-  if (acc === '-' || acc === '_') acc = 'b';
+    const lookupKey = `${letter}${acc}${isMinor ? 'm' : ''}`.toLowerCase();
+    const def = KEY_DEFINITIONS[lookupKey];
+    if (def) {
+      return {
+        name: def.standardName,
+        vexKey: def.vexKey,
+        isMinor: def.isMinor,
+        accidentalsCount: def.count,
+        alteredNotes: createAlteredMap(def.count),
+      };
+    }
+  }
 
-  const lookupKey = `${letter}${acc}${isMinor ? 'm' : ''}`.toLowerCase();
-  const def = KEY_DEFINITIONS[lookupKey];
-  if (!def) return null;
+  // 音名列挙フォールバック判定 (例: 空白区切り "f c g d a e" や順序不同など)
+  // シャープ系: 文字列から 'f','c','g','d','a','e','b' のみで構成されているかを検査
+  const stripped = clean.toLowerCase().replace(/[\s,]+/g, '');
+  if (/^[+]?[fcgdaeb]{1,7}$/.test(stripped)) {
+    const chars = stripped.replace(/^\+/, '').split('');
+    const uniqueChars = Array.from(new Set(chars));
+    // 伝統的シャープ順序 F, C, G, D, A, E, B の個数と調
+    const sharpCountMap: Record<number, string> = {
+      1: '+f', 2: '+fc', 3: '+fcg', 4: '+fcgd', 5: '+fcgda', 6: '+fcgdae', 7: '+fcgdaeb'
+    };
+    const keyAlias = sharpCountMap[uniqueChars.length];
+    if (keyAlias && KEY_DEFINITIONS[keyAlias]) {
+      const def = KEY_DEFINITIONS[keyAlias];
+      return {
+        name: def.standardName,
+        vexKey: def.vexKey,
+        isMinor: false,
+        accidentalsCount: def.count,
+        alteredNotes: createAlteredMap(def.count),
+      };
+    }
+  }
 
-  return {
-    name: def.standardName,
-    vexKey: def.vexKey,
-    isMinor: def.isMinor,
-    accidentalsCount: def.count,
-    alteredNotes: createAlteredMap(def.count),
-  };
+  // フラット系: 文字列から 'b','e','a','d','g','c','f' のみで構成されているかを検査 (先頭 - または 2音以上)
+  if (/^[-]?[beadgcf]{2,7}$/.test(stripped) || /^-[beadgcf]{1,7}$/.test(stripped)) {
+    const chars = stripped.replace(/^-/, '').split('');
+    const uniqueChars = Array.from(new Set(chars));
+    const flatCountMap: Record<number, string> = {
+      1: '-b', 2: '-be', 3: '-bea', 4: '-bead', 5: '-beadg', 6: '-beadgc', 7: '-beadgcf'
+    };
+    const keyAlias = flatCountMap[uniqueChars.length];
+    if (keyAlias && KEY_DEFINITIONS[keyAlias]) {
+      const def = KEY_DEFINITIONS[keyAlias];
+      return {
+        name: def.standardName,
+        vexKey: def.vexKey,
+        isMinor: false,
+        accidentalsCount: def.count,
+        alteredNotes: createAlteredMap(def.count),
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
