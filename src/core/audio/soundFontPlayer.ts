@@ -82,6 +82,13 @@ export class AudioEngine {
       // SoundBank の登録
       await synth.soundBankManager.addSoundBank(buffer, 'main');
 
+      // チャンネル 9 (MIDI Ch 10) をドラムモードに設定
+      try {
+        synth.midiChannels[9]?.setDrums(true);
+      } catch (e) {
+        console.warn('Failed to set drums on channel 9:', e);
+      }
+
       this.synth = synth;
       this.isSoundFontReady = true;
       this.isSynthInitializing = false;
@@ -108,6 +115,9 @@ export class AudioEngine {
     try {
       // 既存の main を上書き
       await this.synth.soundBankManager.addSoundBank(buffer, 'main');
+      try {
+        this.synth.midiChannels[9]?.setDrums(true);
+      } catch {}
       this.isSoundFontReady = true;
       console.log('Custom soundfont applied successfully.');
     } catch (err) {
@@ -253,11 +263,12 @@ export class AudioEngine {
 
         if (effectiveEndSec > startOffsetSec) {
           const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+          const noteChannel = note.channel !== undefined ? Math.max(0, Math.min(15, note.channel - 1)) : midiChannel;
           list.push({
             id: `tr${track.id}_n${noteIdx}_${note.midiNote}_${effectiveStartSec}`,
             startSec: effectiveStartSec,
             endSec: effectiveEndSec,
-            channel: midiChannel,
+            channel: noteChannel,
             midiNote: note.midiNote,
             velocity: note.velocity || 100,
             instrument: inst,
@@ -294,6 +305,11 @@ export class AudioEngine {
     this.channelCurrentPrograms.fill(-1);
 
     if (this.isSoundFontReady && this.synth) {
+      // チャンネル 9 (MIDI Ch 10) をドラムモードに設定
+      try {
+        this.synth.midiChannels[9]?.setDrums(true);
+      } catch {}
+
       this.scheduledNotes = this.prepareScheduledNotes(score, startOffsetSec);
 
       // SoundFont チャンネル設定:
@@ -451,12 +467,162 @@ export class AudioEngine {
 
           if (audioStartTime >= now) {
             const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-            const node = this.scheduleNoteOscillator(ctx, note, inst, audioStartTime, effectiveDurSec, masterGain);
+            const effectiveNote: NoteEvent = {
+              ...note,
+              channel: note.channel !== undefined ? note.channel : track.channel,
+            };
+            const node = this.scheduleNoteOscillator(ctx, effectiveNote, inst, audioStartTime, effectiveDurSec, masterGain);
             this.activeOscillatorNodes.push(node);
           }
         }
       });
     });
+  }
+
+  /**
+   * ドラム音のオシレータ/ノイズ合成 (Web Audio API / OfflineAudioContext 共通)
+   */
+  private scheduleDrumOscillator(
+    ctx: BaseAudioContext,
+    midiNote: number,
+    startAudioTime: number,
+    velocity = 100,
+    masterGain: GainNode
+  ): { stop: (time: number) => void } {
+    const vel = Math.max(0.01, Math.min(1, velocity / 127));
+    const activeNodes: { stop?: (t: number) => void; disconnect?: () => void }[] = [];
+
+    // バスドラム (35, 36)
+    if (midiNote === 35 || midiNote === 36) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(140, startAudioTime);
+      osc.frequency.exponentialRampToValueAtTime(35, startAudioTime + 0.12);
+      gain.gain.setValueAtTime(vel * 0.9, startAudioTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + 0.25);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(startAudioTime);
+      osc.stop(startAudioTime + 0.26);
+      activeNodes.push(osc, gain);
+    }
+    // スネアドラム (38, 40)
+    else if (midiNote === 38 || midiNote === 40) {
+      const bufferSize = Math.floor(ctx.sampleRate * 0.2);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(1000, startAudioTime);
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(vel * 0.6, startAudioTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + 0.2);
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(masterGain);
+      noise.start(startAudioTime);
+
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, startAudioTime);
+      osc.frequency.exponentialRampToValueAtTime(80, startAudioTime + 0.1);
+      oscGain.gain.setValueAtTime(vel * 0.4, startAudioTime);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + 0.15);
+      osc.connect(oscGain);
+      oscGain.connect(masterGain);
+      osc.start(startAudioTime);
+      osc.stop(startAudioTime + 0.2);
+      activeNodes.push(noise, filter, noiseGain, osc, oscGain);
+    }
+    // ハイハット (42: Closed, 44: Pedal, 46: Open)
+    else if (midiNote === 42 || midiNote === 44 || midiNote === 46) {
+      const dur = midiNote === 46 ? 0.35 : 0.08;
+      const bufferSize = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(7000, startAudioTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vel * 0.45, startAudioTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + dur);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      noise.start(startAudioTime);
+      activeNodes.push(noise, filter, gain);
+    }
+    // シンバル (49, 51, 52, 53, 55, 57, 59)
+    else if ([49, 51, 52, 53, 55, 57, 59].includes(midiNote)) {
+      const dur = 0.8;
+      const bufferSize = Math.floor(ctx.sampleRate * dur);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(5500, startAudioTime);
+      filter.Q.setValueAtTime(1.5, startAudioTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vel * 0.5, startAudioTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + dur);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      noise.start(startAudioTime);
+      activeNodes.push(noise, filter, gain);
+    }
+    // タム (41, 43, 45, 47, 48, 50)
+    else if ([41, 43, 45, 47, 48, 50].includes(midiNote)) {
+      const baseFreq = 90 + (midiNote - 41) * 15;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq * 1.4, startAudioTime);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq, startAudioTime + 0.12);
+      gain.gain.setValueAtTime(vel * 0.7, startAudioTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + 0.3);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(startAudioTime);
+      osc.stop(startAudioTime + 0.31);
+      activeNodes.push(osc, gain);
+    }
+    // その他パーカッション (カウベル、ウッドブロック等)
+    else {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(midiToFreq(midiNote), startAudioTime);
+      gain.gain.setValueAtTime(vel * 0.5, startAudioTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAudioTime + 0.15);
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(startAudioTime);
+      osc.stop(startAudioTime + 0.16);
+      activeNodes.push(osc, gain);
+    }
+
+    return {
+      stop: () => {
+        activeNodes.forEach((node) => {
+          try {
+            if (node.stop) node.stop(0);
+            if (node.disconnect) node.disconnect();
+          } catch {}
+        });
+      },
+    };
   }
 
   /**
@@ -470,6 +636,12 @@ export class AudioEngine {
     durationSec: number,
     masterGain: GainNode
   ): { stop: (time: number) => void } {
+    // ドラムパート判定: MIDIチャンネル10 (note.channel === 10)、または楽器128
+    const isDrumNote = note.channel === 10 || instrument === 128;
+    if (isDrumNote) {
+      return this.scheduleDrumOscillator(ctx, note.midiNote, startAudioTime, note.velocity || 100, masterGain);
+    }
+
     const freq = midiToFreq(note.midiNote);
     const vel = (note.velocity || 100) / 127;
 
@@ -805,132 +977,10 @@ export class AudioEngine {
    * フォールバック用のドラム単音合成 (Web Audio API)
    */
   private playFallbackDrumNote(ctx: AudioContext, midiNote: number, velocity = 100) {
-    const now = ctx.currentTime;
-    const vel = Math.max(0.01, Math.min(1, velocity / 127));
-
-    // バスドラム (35, 36)
-    if (midiNote === 35 || midiNote === 36) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(140, now);
-      osc.frequency.exponentialRampToValueAtTime(35, now + 0.12);
-      gain.gain.setValueAtTime(vel * 0.9, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.26);
-      return;
-    }
-
-    // スネア (38, 40)
-    if (midiNote === 38 || midiNote === 40) {
-      // ノイズ成分
-      const bufferSize = ctx.sampleRate * 0.2;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'highpass';
-      filter.frequency.setValueAtTime(1000, now);
-      const noiseGain = ctx.createGain();
-      noiseGain.gain.setValueAtTime(vel * 0.6, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(ctx.destination);
-      noise.start(now);
-      // トーン成分
-      const osc = ctx.createOscillator();
-      const oscGain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
-      oscGain.gain.setValueAtTime(vel * 0.4, now);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-      osc.connect(oscGain);
-      oscGain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.2);
-      return;
-    }
-
-    // ハイハット (42: Closed, 44: Pedal, 46: Open)
-    if (midiNote === 42 || midiNote === 44 || midiNote === 46) {
-      const dur = midiNote === 46 ? 0.35 : 0.08;
-      const bufferSize = Math.floor(ctx.sampleRate * dur);
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'highpass';
-      filter.frequency.setValueAtTime(7000, now);
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(vel * 0.45, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(ctx.destination);
-      noise.start(now);
-      return;
-    }
-
-    // シンバル (49, 51, 52, 53, 55, 57, 59)
-    if ([49, 51, 52, 53, 55, 57, 59].includes(midiNote)) {
-      const dur = 0.8;
-      const bufferSize = Math.floor(ctx.sampleRate * dur);
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(5500, now);
-      filter.Q.setValueAtTime(1.5, now);
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(vel * 0.5, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(ctx.destination);
-      noise.start(now);
-      return;
-    }
-
-    // タム (41, 43, 45, 47, 48, 50)
-    if ([41, 43, 45, 47, 48, 50].includes(midiNote)) {
-      const baseFreq = 90 + (midiNote - 41) * 15;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(baseFreq * 1.4, now);
-      osc.frequency.exponentialRampToValueAtTime(baseFreq, now + 0.12);
-      gain.gain.setValueAtTime(vel * 0.7, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.31);
-      return;
-    }
-
-    // その他パーカッション (ウッドブロック、クラベス等)
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(midiToFreq(midiNote), now);
-    gain.gain.setValueAtTime(vel * 0.5, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.16);
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+    this.scheduleDrumOscillator(ctx, midiNote, ctx.currentTime, velocity, masterGain);
   }
 
   /**
@@ -1108,7 +1158,11 @@ export class AudioEngine {
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-        this.scheduleNoteOscillator(offlineCtx, note, inst, noteStartSec, noteDurSec, masterGain);
+        const effectiveNote: NoteEvent = {
+          ...note,
+          channel: note.channel !== undefined ? note.channel : track.channel,
+        };
+        this.scheduleNoteOscillator(offlineCtx, effectiveNote, inst, noteStartSec, noteDurSec, masterGain);
       });
     });
 

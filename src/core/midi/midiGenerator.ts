@@ -163,16 +163,18 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       const midiNote = Math.max(0, Math.min(127, note.midiNote));
       const velocity = Math.max(1, Math.min(127, note.velocity));
 
+      const noteChannel = (note.channel !== undefined ? note.channel - 1 : channel) & 0x0f;
+
       // Note On
       trackEvents.push({
         tick: startTick,
-        bytes: [0x90 | channel, midiNote, velocity],
+        bytes: [0x90 | noteChannel, midiNote, velocity],
       });
 
       // Note Off
       trackEvents.push({
         tick: endTick,
-        bytes: [0x80 | channel, midiNote, 0],
+        bytes: [0x80 | noteChannel, midiNote, 0],
       });
     });
 
