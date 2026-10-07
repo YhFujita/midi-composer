@@ -238,14 +238,26 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
         const lineContent = model.getLineContent(lineNumber);
 
         // 例: Voice(0), Voice(48) /* ... */, @0 などを検出
-        const voiceRegex = /(?:Voice|Program)\s*\(\s*\d+\s*\)(?:\s*\/\*.*?\*\/)?|@\s*\d+/i;
-        const match = lineContent.match(voiceRegex);
+        // ※ 行内の Voice を無条件に置換すると曲の途中での楽器切り替え（変更→復帰）が書けないため、
+        //    カーソルが既存の Voice コマンド上（または直後）にある場合のみ置換対象とする
+        const voiceRegex = /(?:Voice|Program)\s*\(\s*\d+\s*\)(?:\s*\/\*.*?\*\/)?|@\s*\d+/gi;
+        const cursorCol = selection.startColumn;
+        let match: RegExpExecArray | null = null;
+        let touchedMatch: RegExpExecArray | null = null;
+        while ((match = voiceRegex.exec(lineContent)) !== null) {
+          const startCol = match.index + 1;
+          const endCol = startCol + match[0].length;
+          if (cursorCol >= startCol && cursorCol <= endCol) {
+            touchedMatch = match;
+            break;
+          }
+        }
 
-        if (match && match.index !== undefined) {
-          const matchStartCol = match.index + 1;
-          const matchEndCol = matchStartCol + match[0].length;
+        if (touchedMatch) {
+          const matchStartCol = touchedMatch.index + 1;
+          const matchEndCol = matchStartCol + touchedMatch[0].length;
 
-          // カーソルがその行にある場合は、既存の Voice コマンドを置換対象にする
+          // カーソルが既存の Voice コマンド上にある場合は、そのコマンドを置換対象にする
           targetRange = new monacoRef.current.Range(
             lineNumber,
             matchStartCol,
@@ -261,9 +273,9 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
           let prefix = '';
           if (startPos.column > 1) {
             const charBefore = model.getValueInRange({
-              startLineNumber: startPos.line,
+              startLineNumber: startPos.lineNumber,
               startColumn: startPos.column - 1,
-              endLineNumber: startPos.line,
+              endLineNumber: startPos.lineNumber,
               endColumn: startPos.column,
             });
             if (charBefore && !/\s/.test(charBefore)) {
@@ -272,12 +284,12 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
           }
 
           let suffix = '';
-          const lineMaxCol = model.getLineMaxColumn(endPos.line);
+          const lineMaxCol = model.getLineMaxColumn(endPos.lineNumber);
           if (endPos.column < lineMaxCol) {
             const charAfter = model.getValueInRange({
-              startLineNumber: endPos.line,
+              startLineNumber: endPos.lineNumber,
               startColumn: endPos.column,
-              endLineNumber: endPos.line,
+              endLineNumber: endPos.lineNumber,
               endColumn: endPos.column + 1,
             });
             if (charAfter && !/\s/.test(charAfter)) {
@@ -325,9 +337,9 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       let prefix = '';
       if (startPos.column > 1) {
         const charBefore = model.getValueInRange({
-          startLineNumber: startPos.line,
+          startLineNumber: startPos.lineNumber,
           startColumn: startPos.column - 1,
-          endLineNumber: startPos.line,
+          endLineNumber: startPos.lineNumber,
           endColumn: startPos.column,
         });
         if (charBefore && !/\s/.test(charBefore)) {
@@ -336,12 +348,12 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       }
 
       let suffix = '';
-      const lineMaxCol = model.getLineMaxColumn(endPos.line);
+      const lineMaxCol = model.getLineMaxColumn(endPos.lineNumber);
       if (endPos.column < lineMaxCol) {
         const charAfter = model.getValueInRange({
-          startLineNumber: endPos.line,
+          startLineNumber: endPos.lineNumber,
           startColumn: endPos.column,
-          endLineNumber: endPos.line,
+          endLineNumber: endPos.lineNumber,
           endColumn: endPos.column + 1,
         });
         if (charAfter && !/\s/.test(charAfter)) {
@@ -387,9 +399,9 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       let prefix = '';
       if (startPos.column > 1) {
         const charBefore = model.getValueInRange({
-          startLineNumber: startPos.line,
+          startLineNumber: startPos.lineNumber,
           startColumn: startPos.column - 1,
-          endLineNumber: startPos.line,
+          endLineNumber: startPos.lineNumber,
           endColumn: startPos.column,
         });
         if (charBefore && !/\s/.test(charBefore)) {
@@ -398,12 +410,12 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       }
 
       let suffix = '';
-      const lineMaxCol = model.getLineMaxColumn(endPos.line);
+      const lineMaxCol = model.getLineMaxColumn(endPos.lineNumber);
       if (endPos.column < lineMaxCol) {
         const charAfter = model.getValueInRange({
-          startLineNumber: endPos.line,
+          startLineNumber: endPos.lineNumber,
           startColumn: endPos.column,
-          endLineNumber: endPos.line,
+          endLineNumber: endPos.lineNumber,
           endColumn: endPos.column + 1,
         });
         if (charAfter && !/\s/.test(charAfter)) {

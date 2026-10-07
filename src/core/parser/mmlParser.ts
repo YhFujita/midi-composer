@@ -1364,12 +1364,18 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
   const tracks: Track[] = Array.from(tracksMap.values()).map((ts) => {
     const sortedTempo = ts.tempoEvents.sort((a, b) => a.time - b.time);
     const sortedTimeSig = ts.timeSignatureEvents.sort((a, b) => a.time - b.time);
+    const sortedNotes = ts.notes.sort((a, b) => a.startTime - b.startTime);
+    // トラックの代表音色は「最初に発音される音符の音色」とする
+    // (曲の途中で楽器を変更・復帰した場合でも、最後に指定された音色で上書きされないようにする)
+    const initialInstrument = sortedNotes.length > 0 && sortedNotes[0].instrument !== undefined
+      ? sortedNotes[0].instrument
+      : ts.instrument;
     return {
       id: ts.id,
       name: ts.name,
       channel: ts.channel,
-      instrument: ts.instrument,
-      notes: ts.notes.sort((a, b) => a.startTime - b.startTime),
+      instrument: initialInstrument,
+      notes: sortedNotes,
       tempoEvents: sortedTempo,
       timeSignatureEvents: sortedTimeSig,
       keySignatureEvents: ts.keySignatureEvents.sort((a, b) => a.time - b.time),

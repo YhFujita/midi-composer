@@ -141,6 +141,13 @@ export const App: React.FC = () => {
     }
   }, [mmlText, cursorPosition.lineNumber, cursorPosition.column, parsedScore]);
 
+  // カーソル位置の楽器が変わった場合、選択中の楽器（ピアノプレビュー・ツールバー用）を同期する
+  useEffect(() => {
+    if (cursorContext.instrument !== undefined) {
+      setSelectedProgram(cursorContext.instrument);
+    }
+  }, [cursorContext.instrument]);
+
   // カーソルがドラムトラックに入った場合、自動的にバーチャルピアノ鍵盤を下部に表示
   useEffect(() => {
     if (cursorContext.isDrum && !prevIsDrumRef.current) {

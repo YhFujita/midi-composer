@@ -294,16 +294,30 @@ export class AudioEngine {
     this.channelCurrentPrograms.fill(-1);
 
     if (this.isSoundFontReady && this.synth) {
-      // SoundFont チャンネル設定 (各トラックの初期楽器を設定)
+      this.scheduledNotes = this.prepareScheduledNotes(score, startOffsetSec);
+
+      // SoundFont チャンネル設定:
+      // 再生開始位置以降で各チャンネルが最初に発音する音符の音色を初期音色として設定する
+      // (曲の途中で楽器を変更・復帰していても、再生位置に応じた正しい音色から開始する)
+      const initialPrograms = new Map<number, number>();
+      this.scheduledNotes.forEach((item) => {
+        if (!initialPrograms.has(item.channel)) {
+          initialPrograms.set(item.channel, item.instrument);
+        }
+      });
       score.tracks.forEach((track) => {
         const ch = Math.max(0, Math.min(15, track.channel - 1));
+        if (!initialPrograms.has(ch)) {
+          initialPrograms.set(ch, track.instrument);
+        }
+      });
+      initialPrograms.forEach((program, ch) => {
         if (ch !== 9) { // チャンネル 9 (10) はドラム専用
-          this.synth?.programChange(ch, track.instrument);
-          this.channelCurrentPrograms[ch] = track.instrument;
+          this.synth?.programChange(ch, program);
+          this.channelCurrentPrograms[ch] = program;
         }
       });
 
-      this.scheduledNotes = this.prepareScheduledNotes(score, startOffsetSec);
       this.startSoundFontScheduler();
     } else {
       // SoundFont ロード前はオシレータフォールバックで再生
@@ -931,7 +945,11 @@ export class AudioEngine {
         // GMドラムチャンネル (インデックス 9 = MIDI Ch 10)
         this.synth.noteOn(9, midiNote, Math.max(1, Math.min(127, velocity)));
       } else {
-        this.synth.programChange(0, instrument);
+        if (this.channelCurrentPrograms[0] !== instrument) {
+          this.synth.programChange(0, instrument);
+          // 再生スケジューラ側の音色キャッシュと同期させる (再生中の音色ズレ防止)
+          this.channelCurrentPrograms[0] = instrument;
+        }
         this.synth.noteOn(0, midiNote, Math.max(1, Math.min(127, velocity)));
       }
     } else {

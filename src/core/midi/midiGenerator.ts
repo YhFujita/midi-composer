@@ -115,16 +115,27 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       bytes: [0xff, 0x03, trackNameBytes.length, ...trackNameBytes],
     });
 
-    // プログラムチェンジ (音色選択)
+    // プログラムチェンジ (音色選択): 先頭の音色
+    let currentProgram = track.instrument & 0x7f;
     trackEvents.push({
       tick: 0,
-      bytes: [0xc0 | channel, track.instrument & 0x7f],
+      bytes: [0xc0 | channel, currentProgram],
     });
 
     // ノートオン / ノートオフ イベント
     track.notes.forEach((note, noteIdx) => {
       // タイで前の音から引き継がれている音符は単独で Note On を発音しない
       if (note.hasTieFromPrev) return;
+
+      // 曲の途中で音色が変わった場合はプログラムチェンジを挿入
+      const noteProgram = (note.instrument !== undefined ? note.instrument : track.instrument) & 0x7f;
+      if (noteProgram !== currentProgram) {
+        trackEvents.push({
+          tick: Math.round(note.startTime * PPQ),
+          bytes: [0xc0 | channel, noteProgram],
+        });
+        currentProgram = noteProgram;
+      }
 
       let effectiveDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
       let effectiveEndBeat = note.startTime + effectiveDur;
