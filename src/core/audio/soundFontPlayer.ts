@@ -45,6 +45,12 @@ export class AudioEngine {
   private activeOscillatorNodes: { stop: (time: number) => void }[] = [];
   private activeSingleOscillators = new Map<number, { osc: OscillatorNode; gain: GainNode; stopTimer?: any }>();
 
+  // 音切れ・音飛び防止用ステート管理
+  private channelCurrentPrograms: number[] = new Array(16).fill(-1);
+  private pendingNoteOffTimers = new Map<string, any>();
+  private previewTimers: any[] = [];
+  private activePreviewNotes = new Map<number, { stopTimer?: any }>();
+
   constructor() {
     // アプリ起動時にバックグラウンドで SoundFont の準備を開始
     if (typeof window !== 'undefined') {
@@ -239,7 +245,11 @@ export class AudioEngine {
           : 0;
 
         const effectiveStartSec = noteStartSec + strumOffsetSec;
-        const effectiveEndSec = Math.max(effectiveStartSec + 0.05, noteEndSec);
+        // タイで繋がっていない場合、同一ノートの連続発音時に NoteOff が次の NoteOn を打ち消して
+        // 音がブツブツ切れるのを防ぐため、微小なリリースギャップ(約15ms)を設ける
+        const rawDurSec = Math.max(0.01, noteEndSec - noteStartSec);
+        const releaseGap = note.hasTieToNext ? 0 : Math.min(0.018, Math.max(0.005, rawDurSec * 0.05));
+        const effectiveEndSec = Math.max(effectiveStartSec + 0.04, noteEndSec - releaseGap);
 
         if (effectiveEndSec > startOffsetSec) {
           const inst = note.instrument !== undefined ? note.instrument : track.instrument;
@@ -281,12 +291,15 @@ export class AudioEngine {
       this.initSoundFont();
     }
 
+    this.channelCurrentPrograms.fill(-1);
+
     if (this.isSoundFontReady && this.synth) {
       // SoundFont チャンネル設定 (各トラックの初期楽器を設定)
       score.tracks.forEach((track) => {
         const ch = Math.max(0, Math.min(15, track.channel - 1));
         if (ch !== 9) { // チャンネル 9 (10) はドラム専用
           this.synth?.programChange(ch, track.instrument);
+          this.channelCurrentPrograms[ch] = track.instrument;
         }
       });
 
@@ -321,29 +334,51 @@ export class AudioEngine {
           break;
         }
 
-        // 発音スケジュール
-        if (!item.isStarted && item.startSec >= currentSec - 0.05 && item.startSec <= windowEndSec) {
+        // 発音スケジュール (過去の未発音ノートも含め確実にスケジュールして音飛びを防止)
+        if (!item.isStarted && item.startSec <= windowEndSec) {
           item.isStarted = true;
           const delayMs = Math.max(0, (item.startSec - currentSec) * 1000);
+          const noteKey = `${item.channel}_${item.midiNote}`;
 
           item.onTimerId = setTimeout(() => {
             if (!this.isPlaying || !this.synth) return;
-            // 楽器変更が必要な場合
-            if (item.channel !== 9) {
-              this.synth.programChange(item.channel, item.instrument);
+
+            // 1. 同一チャンネル・同一ノートの保留中 NoteOff があれば先にクリア＆確実に消音
+            // これにより、前の音の NoteOff が新しい NoteOn の直後に発火して消音してしまう事故を防ぐ
+            if (this.pendingNoteOffTimers.has(noteKey)) {
+              clearTimeout(this.pendingNoteOffTimers.get(noteKey));
+              this.pendingNoteOffTimers.delete(noteKey);
+              try {
+                this.synth.noteOff(item.channel, item.midiNote);
+              } catch {
+                // ignore
+              }
             }
+
+            // 2. 楽器変更が必要な場合のみ programChange を送信 (不要な連打による音切れ・ボイス途切れを防止)
+            if (item.channel !== 9) {
+              const currentProg = this.channelCurrentPrograms[item.channel];
+              if (currentProg !== item.instrument) {
+                this.synth.programChange(item.channel, item.instrument);
+                this.channelCurrentPrograms[item.channel] = item.instrument;
+              }
+            }
+
+            // 3. 発音
             this.synth.noteOn(item.channel, item.midiNote, item.velocity);
           }, delayMs);
           this.activeTimers.push(item.onTimerId);
 
           // 停止スケジュール
-          const offDelayMs = Math.max(10, (item.endSec - currentSec) * 1000);
+          const offDelayMs = Math.max(15, (item.endSec - currentSec) * 1000);
           item.offTimerId = setTimeout(() => {
             if (!this.synth) return;
             this.synth.noteOff(item.channel, item.midiNote);
+            this.pendingNoteOffTimers.delete(noteKey);
             item.isEnded = true;
           }, offDelayMs);
           this.activeTimers.push(item.offTimerId);
+          this.pendingNoteOffTimers.set(noteKey, item.offTimerId);
         }
       }
     };
@@ -556,7 +591,12 @@ export class AudioEngine {
     }
     this.activeTimers.forEach((id) => clearTimeout(id));
     this.activeTimers = [];
+    this.pendingNoteOffTimers.forEach((id) => clearTimeout(id));
+    this.pendingNoteOffTimers.clear();
+    this.previewTimers.forEach((id) => clearTimeout(id));
+    this.previewTimers = [];
     this.scheduledNotes = [];
+    this.channelCurrentPrograms.fill(-1);
 
     if (this.synth) {
       try {
@@ -622,24 +662,37 @@ export class AudioEngine {
   public previewInstrument(instrument: number) {
     const ctx = this.initAudioContext();
 
+    // 以前のプレビュー演奏タイマーをキャンセル
+    this.previewTimers.forEach((id) => clearTimeout(id));
+    this.previewTimers = [];
+
     if (this.isSoundFontReady && this.synth) {
-      // チャンネル0で楽器変更してアルペジオ演奏
+      // プレビュー用チャンネル(0)の発音中ボイスを停止してから楽器変更
+      try {
+        [60, 64, 67].forEach((midi) => this.synth?.noteOff(0, midi));
+      } catch {}
+
       this.synth.programChange(0, instrument);
+      this.channelCurrentPrograms[0] = instrument;
 
       const notes = [
-        { midi: 60, delay: 0, dur: 350 },
-        { midi: 64, delay: 150, dur: 350 },
-        { midi: 67, delay: 300, dur: 600 },
+        { midi: 60, delay: 0, dur: 330 },
+        { midi: 64, delay: 150, dur: 330 },
+        { midi: 67, delay: 300, dur: 580 },
       ];
 
       notes.forEach((n) => {
-        setTimeout(() => {
+        const onTimer = setTimeout(() => {
           if (!this.synth) return;
           this.synth.noteOn(0, n.midi, 100);
-          setTimeout(() => {
+
+          const offTimer = setTimeout(() => {
             this.synth?.noteOff(0, n.midi);
           }, n.dur);
+          this.previewTimers.push(offTimer);
         }, n.delay);
+
+        this.previewTimers.push(onTimer);
       });
     } else {
       // フォールバック
@@ -679,24 +732,36 @@ export class AudioEngine {
     strumDirection: 'down' | 'up' = 'down'
   ) {
     const ctx = this.initAudioContext();
+    this.previewTimers.forEach((id) => clearTimeout(id));
+    this.previewTimers = [];
+
     const sorted = [...midiNotes].sort((a, b) =>
       strumDirection === 'down' ? a - b : b - a
     );
 
     if (this.isSoundFontReady && this.synth) {
+      try {
+        midiNotes.forEach((midi) => this.synth?.noteOff(0, midi));
+      } catch {}
+
       this.synth.programChange(0, instrument);
+      this.channelCurrentPrograms[0] = instrument;
 
       sorted.forEach((midi, idx) => {
         const delay = isStrum ? idx * 40 : 0;
-        const dur = Math.max(400, 1200 - delay);
+        const dur = Math.max(350, 1150 - delay);
 
-        setTimeout(() => {
+        const onTimer = setTimeout(() => {
           if (!this.synth) return;
           this.synth.noteOn(0, midi, 95);
-          setTimeout(() => {
+
+          const offTimer = setTimeout(() => {
             this.synth?.noteOff(0, midi);
           }, dur);
+          this.previewTimers.push(offTimer);
         }, delay);
+
+        this.previewTimers.push(onTimer);
       });
     } else {
       // フォールバック
@@ -813,10 +878,20 @@ export class AudioEngine {
    * ピアノ鍵盤クリック用: 指定ミリ秒後に自動ノートオフする単音プレビュー
    */
   public previewNote(midiNote: number, durationMs = 600, instrument = 0, velocity = 100) {
-    this.noteOn(midiNote, velocity, instrument);
-    setTimeout(() => {
+    const existing = this.activePreviewNotes.get(midiNote);
+    if (existing?.stopTimer) {
+      clearTimeout(existing.stopTimer);
+      this.activePreviewNotes.delete(midiNote);
       this.noteOff(midiNote);
+    }
+
+    this.noteOn(midiNote, velocity, instrument);
+    const stopTimer = setTimeout(() => {
+      this.noteOff(midiNote);
+      this.activePreviewNotes.delete(midiNote);
     }, Math.max(100, durationMs));
+
+    this.activePreviewNotes.set(midiNote, { stopTimer });
   }
 
   /**
