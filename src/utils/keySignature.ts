@@ -41,6 +41,10 @@ function createAlteredMap(count: number): Record<string, '#' | 'b'> {
 const KEY_DEFINITIONS: Record<string, { standardName: string; vexKey: string; isMinor: boolean; count: number }> = {
   // 長調 (Major)
   'c': { standardName: 'C', vexKey: 'C', isMinor: false, count: 0 },
+  '0': { standardName: 'C', vexKey: 'C', isMinor: false, count: 0 },
+  '=': { standardName: 'C', vexKey: 'C', isMinor: false, count: 0 },
+  'natural': { standardName: 'C', vexKey: 'C', isMinor: false, count: 0 },
+  '♮': { standardName: 'C', vexKey: 'C', isMinor: false, count: 0 },
   'g': { standardName: 'G', vexKey: 'G', isMinor: false, count: 1 },
   'd': { standardName: 'D', vexKey: 'D', isMinor: false, count: 2 },
   'a': { standardName: 'A', vexKey: 'A', isMinor: false, count: 3 },

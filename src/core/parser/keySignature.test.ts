@@ -275,4 +275,46 @@ describe('MML パーサーにおける調号機能と自動音高適用', () => 
     // ナチュラル e=4 は五線譜上 e/4 に置かれる
     expect(noteItems[2].staveNote.getKeys()).toEqual(['e/4']);
   });
+
+  it('調号下の音階にさらに#を付けた場合、Unicode♮指定、一度ナチュラルにした後の調号自動復帰、調号消去を正しく処理できる', () => {
+    // 1. 調号で既に#が付いている音階にさらに#を明示指定した場合: 全音上がるのではなく F#4 (66) になる
+    const mml = `
+      Key G
+      o4 f4 f#4 f♮4 f4
+    `;
+    const score = parseMML(mml);
+    const notes = score.tracks[0].notes;
+    expect(notes.length).toBe(4);
+
+    // 1音目: f4 -> 調号により自動的に F#4 (MIDI 66)
+    expect(notes[0].pitch).toBe('F#4');
+    expect(notes[0].midiNote).toBe(66);
+    expect(notes[0].isKeyAltered).toBe(true);
+
+    // 2音目: f#4 -> さらに#を付けても全音(G)にはならず、明示的シャープ F#4 (MIDI 66)
+    expect(notes[1].pitch).toBe('F#4');
+    expect(notes[1].midiNote).toBe(66);
+    expect(notes[1].accidentalType).toBe('#');
+
+    // 3音目: f♮4 -> Unicode ナチュラル記号で白鍵 F4 (MIDI 65)
+    expect(notes[2].pitch).toBe('F4');
+    expect(notes[2].midiNote).toBe(65);
+    expect(notes[2].accidentalType).toBe('n');
+
+    // 4音目: f4 -> 一度ナチュラルにした後、次は何も付けなくても自動的に調号 F#4 (MIDI 66) に戻る！
+    expect(notes[3].pitch).toBe('F#4');
+    expect(notes[3].midiNote).toBe(66);
+    expect(notes[3].isKeyAltered).toBe(true);
+
+    // 5. 調号を消す場合: Key C または Key 0 または {=} でハ長調（調号なし）に戻る
+    const mmlReset = `
+      Key G
+      o4 f4
+      Key C
+      o4 f4
+    `;
+    const scoreReset = parseMML(mmlReset);
+    expect(scoreReset.tracks[0].notes[0].pitch).toBe('F#4');
+    expect(scoreReset.tracks[0].notes[1].pitch).toBe('F4'); // 調号リセット後は白鍵F4
+  });
 });

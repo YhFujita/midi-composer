@@ -6,7 +6,7 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
  * 音名とオクターブ（例: "C4", "F#5", "Bb3"）から MIDIノート番号 (0〜127) を算出する
  */
 export function pitchToMidi(pitch: string): number {
-  const match = pitch.trim().match(/^([A-Ga-g])([#\+\-_b]?)(-?\d+)$/);
+  const match = pitch.trim().match(/^([A-Ga-g])([#\+\-_b♯♭]?)(-?\d+)$/);
   if (!match) return 60; // デフォルトは C4 (60)
 
   const rawNote = match[1].toUpperCase();
@@ -24,9 +24,9 @@ export function pitchToMidi(pitch: string): number {
     case 'B': baseIndex = 11; break;
   }
 
-  if (accidental === '#' || accidental === '+') {
+  if (accidental === '#' || accidental === '+' || accidental === '♯') {
     baseIndex += 1;
-  } else if (accidental === '-' || accidental === '_' || accidental === 'b') {
+  } else if (accidental === '-' || accidental === '_' || accidental === 'b' || accidental === '♭') {
     baseIndex -= 1;
   }
 

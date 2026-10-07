@@ -115,13 +115,13 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     let accidentalType: '#' | 'b' | 'n' | undefined = undefined;
     let isKeyAltered = false;
 
-    if (rawAcc === '+' || rawAcc === '#') {
+    if (rawAcc === '+' || rawAcc === '#' || rawAcc === '♯') {
       accidental = '#';
       accidentalType = '#';
-    } else if (rawAcc === '-' || rawAcc === '_') {
+    } else if (rawAcc === '-' || rawAcc === '_' || rawAcc === 'b' || rawAcc === '♭') {
       accidental = 'b';
       accidentalType = 'b';
-    } else if (rawAcc === '=' || rawAcc.toLowerCase() === 'n') {
+    } else if (rawAcc === '=' || rawAcc.toLowerCase() === 'n' || rawAcc === '♮') {
       // 明示的ナチュラル
       accidental = '';
       accidentalType = 'n';
@@ -931,7 +931,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 if (cc === '>') { if (cOct < 9) cOct++; ci++; continue; }
                 if (cc === '<') { if (cOct > 0) cOct--; ci++; continue; }
                 if (cc === "'") { if (cOct < 9) cOct++; ci++; continue; }
-                const nm = insideChord.slice(ci).match(/^([a-gA-G])([#\+\-_=n]?)/);
+                const nm = insideChord.slice(ci).match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)/);
                 if (nm) {
                   const resolved = resolvePitchWithKey(nm[1], nm[2] || '', cOct, currentTrack);
                   cNotes.push({
@@ -963,7 +963,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           }
 
           // 単音符
-          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_=n]?)/i);
+          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)/i);
           if (nMatch) {
             const resolved = resolvePitchWithKey(nMatch[1], nMatch[2] || '', tempOctave, currentTrack);
             tupletItems.push({
@@ -1199,7 +1199,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               continue;
             }
 
-            const noteMatch = chordContent.slice(cIdx).match(/^([a-gA-G])([#\+\-_=n]?)/);
+            const noteMatch = chordContent.slice(cIdx).match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)/);
             if (noteMatch) {
               const resolved = resolvePitchWithKey(noteMatch[1], noteMatch[2] || '', chordOctave, currentTrack);
               const chordTripInfo = getTripletInfo(chordDuration);
@@ -1298,8 +1298,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, =, n, および長さ)
-      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_=n]?)((?:[\^&]?\d*\.*)*)/i);
+      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, =, n, ♮, ♯, ♭ および長さ)
+      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)((?:[\^&]?\d*\.*)*)/i);
       if (singleNoteMatch) {
         const noteLetter = singleNoteMatch[1];
         const rawAcc = singleNoteMatch[2] || '';
