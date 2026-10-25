@@ -13,6 +13,7 @@ export interface CursorPosition {
 
 export interface MmlEditorActions {
   insertText: (text: string) => void;
+  replaceLastInsertedText?: (newText: string) => boolean;
   deleteBackward: () => void;
   undo?: () => void;
   setPosition?: (lineNumber: number, column: number) => void;
@@ -43,6 +44,13 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
 }) => {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<any>(null);
+  // 直前に insertTextAtCursor で挿入されたテキストの範囲情報 (半リアルタイム入力直後の音長差し替え用)
+  const lastInsertedRangeRef = useRef<{
+    lineNumber: number;
+    startColumn: number;
+    endColumn: number;
+    text: string;
+  } | null>(null);
 
   // 選択中の楽器・モーダル状態 (propsがあれば優先)
   const [internalProgram, setInternalProgram] = useState<number>(0);
@@ -393,11 +401,13 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
     const targetRange = selection;
     let textToInsert = rawText;
 
+    const startPos = selection.getStartPosition();
+    let prefix = '';
+    let suffix = '';
+
     if (selection.isEmpty()) {
-      const startPos = selection.getStartPosition();
       const endPos = selection.getEndPosition();
 
-      let prefix = '';
       if (startPos.column > 1) {
         const charBefore = model.getValueInRange({
           startLineNumber: startPos.lineNumber,
@@ -410,7 +420,6 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
         }
       }
 
-      let suffix = '';
       const lineMaxCol = model.getLineMaxColumn(endPos.lineNumber);
       if (endPos.column < lineMaxCol) {
         const charAfter = model.getValueInRange({
@@ -438,7 +447,77 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
     ]);
     editor.pushUndoStop();
 
+    // 改行を含まない単一行テキスト挿入の場合、直後の音長変更用に範囲を記録
+    if (!rawText.includes('\n')) {
+      const rawStartCol = startPos.column + prefix.length;
+      const rawEndCol = rawStartCol + rawText.length;
+      lastInsertedRangeRef.current = {
+        lineNumber: startPos.lineNumber,
+        startColumn: rawStartCol,
+        endColumn: rawEndCol,
+        text: rawText,
+      };
+    } else {
+      lastInsertedRangeRef.current = null;
+    }
+
     editor.focus();
+  }, []);
+
+  // 直前に挿入した音符テキストを別の音長テキストへその場で置換する処理
+  const replaceLastInsertedText = useCallback((newRawText: string): boolean => {
+    if (!editorRef.current || !monacoRef.current || !lastInsertedRangeRef.current) return false;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return false;
+
+    const last = lastInsertedRangeRef.current;
+    if (last.lineNumber < 1 || last.lineNumber > model.getLineCount()) {
+      lastInsertedRangeRef.current = null;
+      return false;
+    }
+
+    const currentTextInRange = model.getValueInRange({
+      startLineNumber: last.lineNumber,
+      startColumn: last.startColumn,
+      endLineNumber: last.lineNumber,
+      endColumn: last.endColumn,
+    });
+
+    // 対象範囲の文字列が直前に挿入したものと一致する場合のみ安全に置換
+    if (currentTextInRange !== last.text) {
+      lastInsertedRangeRef.current = null;
+      return false;
+    }
+
+    const range = new monacoRef.current.Range(
+      last.lineNumber,
+      last.startColumn,
+      last.lineNumber,
+      last.endColumn
+    );
+
+    editor.pushUndoStop();
+    editor.executeEdits('replace-last-note', [
+      {
+        range,
+        text: newRawText,
+        forceMoveMarkers: true,
+      },
+    ]);
+    editor.pushUndoStop();
+
+    const newEndCol = last.startColumn + newRawText.length;
+    lastInsertedRangeRef.current = {
+      lineNumber: last.lineNumber,
+      startColumn: last.startColumn,
+      endColumn: newEndCol,
+      text: newRawText,
+    };
+
+    editor.setPosition({ lineNumber: last.lineNumber, column: newEndCol });
+    editor.focus();
+    return true;
   }, []);
 
   // 直前の編集操作を元に戻す (Undo)
@@ -490,12 +569,13 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
     if (editorActionsRef) {
       editorActionsRef.current = {
         insertText: insertTextAtCursor,
+        replaceLastInsertedText,
         deleteBackward,
         undo: undoEdit,
         setPosition: setCursorPosition,
       };
     }
-  }, [editorActionsRef, insertTextAtCursor, deleteBackward, undoEdit, setCursorPosition]);
+  }, [editorActionsRef, insertTextAtCursor, replaceLastInsertedText, deleteBackward, undoEdit, setCursorPosition]);
 
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">

@@ -5,7 +5,10 @@ import { PianoKeyboardPanel } from './PianoKeyboardPanel';
 import { SvgPianoKeyboard } from './SvgPianoKeyboard';
 import { NoteIcon } from './NoteIcon';
 import { SemiRealtimeMonitor } from './SemiRealtimeMonitor';
-import { DEFAULT_ENABLED_CANDIDATE_IDS } from '../../utils/semiRealtimeQuantizer';
+import {
+  DEFAULT_ENABLED_CANDIDATE_IDS,
+  SEMI_REALTIME_CANDIDATES,
+} from '../../utils/semiRealtimeQuantizer';
 
 describe('Keyboard components', () => {
   it('PianoKeyboardPanel が正常にレンダリングされる (isDrumMode: false)', () => {
@@ -61,6 +64,32 @@ describe('Keyboard components', () => {
     expect(holdingHtml).toContain('計測中');
     expect(holdingHtml).toContain('付点4分音符');
     expect(holdingHtml).toContain('c4.');
+
+    const modifiableHtml = renderToString(
+      <SemiRealtimeMonitor
+        isHolding={false}
+        holdingBeats={0}
+        holdingSec={0}
+        previewMml=""
+        enabledCandidateIds={DEFAULT_ENABLED_CANDIDATE_IDS}
+        clickIntervalBeats={1}
+        effectiveBpm={120}
+        lastClickFlash={null}
+        lastResult={{
+          candidate: SEMI_REALTIME_CANDIDATES.find((c) => c.id === '4')!,
+          elapsedBeats: 0.95,
+          elapsedSec: 0.475,
+          mml: 'c4',
+          midiNote: 60,
+          prevOctave: 4,
+          canModify: true,
+        }}
+        onSelectLastCandidate={() => {}}
+        onStepLastCandidate={() => {}}
+      />
+    );
+    expect(modifiableHtml).toContain('↑↓で修正可');
+    expect(modifiableHtml).toContain('c4');
   });
 
   it('PianoKeyboardPanel が正常にレンダリングされる (isDrumMode: true)', () => {

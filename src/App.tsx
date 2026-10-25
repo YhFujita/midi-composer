@@ -590,6 +590,9 @@ export const App: React.FC = () => {
           isOpen={isKeyboardOpen}
           onClose={() => setIsKeyboardOpen(false)}
           onInsertText={(text) => editorActionsRef.current?.insertText(text)}
+          onReplaceLastText={(newText) =>
+            editorActionsRef.current?.replaceLastInsertedText?.(newText) ?? false
+          }
           onBackspace={() => editorActionsRef.current?.deleteBackward()}
           onUndo={() => editorActionsRef.current?.undo?.()}
           currentProgram={selectedProgram}

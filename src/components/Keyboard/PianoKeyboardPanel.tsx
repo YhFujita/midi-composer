@@ -27,6 +27,7 @@ import {
   METRONOME_INTERVAL_OPTIONS,
   MetronomeIntervalBeats,
   MetronomeClickAccent,
+  SemiRealtimeCandidate,
   quantizeBeatsToZone,
   msToBeats,
   getMetronomeAccentAtBeat,
@@ -36,6 +37,8 @@ export interface PianoKeyboardPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onInsertText: (text: string) => void;
+  /** 直前に挿入した音符テキストを新しい音長のテキストへ置換するコールバック */
+  onReplaceLastText?: (newText: string) => boolean;
   onBackspace?: () => void;
   onUndo?: () => void;
   currentProgram?: number;
@@ -145,6 +148,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
   isOpen,
   onClose,
   onInsertText,
+  onReplaceLastText,
   onBackspace,
   onUndo,
   currentProgram = 0,
@@ -511,6 +515,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
 
         if (!wasCancelled) {
           const cfg = latestSemiRtConfigRef.current;
+          const prevOctave = cfg.lastInsertedOctave;
           const beats = msToBeats(elapsedMs, cfg.effectiveBpm);
           const matchedZone = quantizeBeatsToZone(beats, cfg.enabledCandidateIds);
 
@@ -518,7 +523,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
             midiNote,
             matchedZone.candidate.duration,
             matchedZone.candidate.isDotted,
-            cfg.lastInsertedOctave,
+            prevOctave,
             cfg.octaveFormat
           );
 
@@ -531,9 +536,12 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
             candidate: matchedZone.candidate,
             elapsedBeats: beats,
             elapsedSec: elapsedMs / 1000,
+            midiNote,
+            prevOctave,
+            canModify: true,
           });
           triggerFeedback(
-            `⏱️ ${matchedZone.candidate.label} (${code}) を入力 [${beats.toFixed(2)}拍]`
+            `⏱️ ${matchedZone.candidate.label} (${code}) を入力 [↑↓キー・ゲージクリックで長さ修正可]`
           );
         }
       }
@@ -541,11 +549,85 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
     [isDrumMode, mode, onInsertText, triggerFeedback]
   );
 
+  // 直前に入力した音符の修正可能状態を解除するヘルパー
+  const clearLastNoteModifiable = useCallback(() => {
+    setLastQuantizedResult((prev) => (prev && prev.canModify ? { ...prev, canModify: false } : prev));
+  }, []);
+
+  // 直前に確定した音符の長さを指定した音符候補へ差し替えるハンドラ
+  const handleSelectLastNoteCandidate = useCallback(
+    (newCandidate: SemiRealtimeCandidate) => {
+      if (!lastQuantizedResult || !lastQuantizedResult.canModify) return;
+      if (newCandidate.id === lastQuantizedResult.candidate.id) return;
+
+      const { code, nextOctave } = buildNoteMml(
+        lastQuantizedResult.midiNote,
+        newCandidate.duration,
+        newCandidate.isDotted,
+        lastQuantizedResult.prevOctave,
+        octaveFormat
+      );
+
+      const replaced = onReplaceLastText ? onReplaceLastText(code) : true;
+      if (replaced) {
+        latestSemiRtConfigRef.current.lastInsertedOctave = nextOctave;
+        setLastInsertedOctave(nextOctave);
+        setLastQuantizedResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                mml: code,
+                candidate: newCandidate,
+              }
+            : null
+        );
+        triggerFeedback(`✏️ 直前の音符を ${newCandidate.label} (${code}) に修正しました`);
+      } else {
+        clearLastNoteModifiable();
+        triggerFeedback('⚠️ エディタのカーソル位置が変わったため修正できません');
+      }
+    },
+    [lastQuantizedResult, octaveFormat, onReplaceLastText, triggerFeedback, clearLastNoteModifiable]
+  );
+
+  // 直前に確定した音符の長さを有効候補内で1段階短く(-1) / 長く(+1) 変更するハンドラ
+  const handleStepLastNoteCandidate = useCallback(
+    (stepDelta: -1 | 1) => {
+      if (!lastQuantizedResult || !lastQuantizedResult.canModify) return;
+      const enabledSet = new Set(enabledCandidateIds);
+      const activeList = SEMI_REALTIME_CANDIDATES.filter((c) => enabledSet.has(c.id));
+      const list = activeList.length > 0 ? activeList : SEMI_REALTIME_CANDIDATES;
+
+      const currentIdx = list.findIndex((c) => c.id === lastQuantizedResult.candidate.id);
+      let targetIdx = -1;
+      if (currentIdx !== -1) {
+        targetIdx = currentIdx + stepDelta;
+      } else {
+        if (stepDelta > 0) {
+          targetIdx = list.findIndex((c) => c.beats > lastQuantizedResult.candidate.beats);
+        } else {
+          for (let i = list.length - 1; i >= 0; i--) {
+            if (list[i].beats < lastQuantizedResult.candidate.beats) {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (targetIdx >= 0 && targetIdx < list.length) {
+        handleSelectLastNoteCandidate(list[targetIdx]);
+      }
+    },
+    [lastQuantizedResult, enabledCandidateIds, handleSelectLastNoteCandidate]
+  );
+
   // 休符挿入
   const handleInsertRest = useCallback(() => {
+    clearLastNoteModifiable();
     const durStr = `${duration}${isDotted ? '.' : ''}`;
     onInsertText(`r${durStr}`);
-  }, [duration, isDotted, onInsertText]);
+  }, [duration, isDotted, onInsertText, clearLastNoteModifiable]);
 
   // オクターブシフト操作
   const handleOctaveShift = useCallback((delta: number) => {
@@ -611,6 +693,19 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       }
 
       const key = e.key;
+
+      // 0. 半リアルタイムモードで音符入力直後の場合: 上下キー (ArrowUp / ArrowDown) で直前の音符長を1段階変更
+      if (
+        mode === 'semi-realtime' &&
+        !holdStateRef.current.active &&
+        lastQuantizedResult?.canModify &&
+        (key === 'ArrowUp' || key === 'ArrowDown')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleStepLastNoteCandidate(key === 'ArrowUp' ? 1 : -1);
+        return;
+      }
 
       // 1. 数字キー: 音長 / 休符長 切り替え
       if (key === '1') {
@@ -721,6 +816,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       if (key === '^' || key === '~') {
         e.preventDefault();
         e.stopPropagation();
+        clearLastNoteModifiable();
         onInsertText('^');
         triggerFeedback('タイ (^) を挿入');
         return;
@@ -730,6 +826,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       if (key === ' ' || e.code === 'Space') {
         e.preventDefault();
         e.stopPropagation();
+        clearLastNoteModifiable();
         onInsertText(' ');
         triggerFeedback('空白 を挿入');
         return;
@@ -739,6 +836,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       if (key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
+        clearLastNoteModifiable();
         onInsertText('\n');
         triggerFeedback('改行 を挿入');
         return;
@@ -749,6 +847,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
         if (onBackspace) {
           e.preventDefault();
           e.stopPropagation();
+          clearLastNoteModifiable();
           onBackspace();
           triggerFeedback('削除 (BS)');
         }
@@ -759,6 +858,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       if (key === '>') {
         e.preventDefault();
         e.stopPropagation();
+        clearLastNoteModifiable();
         onInsertText('>');
         triggerFeedback('オクターブUP (>)');
         return;
@@ -766,6 +866,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
       if (key === '<') {
         e.preventDefault();
         e.stopPropagation();
+        clearLastNoteModifiable();
         onInsertText('<');
         triggerFeedback('オクターブDOWN (<)');
         return;
@@ -785,6 +886,9 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
     duration,
     isDotted,
     isWaitingSixAfterOne,
+    lastQuantizedResult,
+    handleStepLastNoteCandidate,
+    clearLastNoteModifiable,
     handleInsertRest,
     onInsertText,
     onBackspace,
@@ -1287,6 +1391,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  clearLastNoteModifiable();
                   onInsertText('^');
                   triggerFeedback('タイ (^) を挿入');
                 }}
@@ -1298,6 +1403,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  clearLastNoteModifiable();
                   onInsertText(' ');
                   triggerFeedback('空白 を挿入');
                 }}
@@ -1309,6 +1415,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  clearLastNoteModifiable();
                   onInsertText('\n');
                   triggerFeedback('改行 を挿入');
                 }}
@@ -1321,6 +1428,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    clearLastNoteModifiable();
                     onUndo();
                     triggerFeedback('直前の操作を取消 (Undo)');
                   }}
@@ -1334,6 +1442,7 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    clearLastNoteModifiable();
                     onBackspace();
                     triggerFeedback('削除 (BS)');
                   }}
@@ -1496,6 +1605,8 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
             effectiveBpm={effectiveBpm}
             lastClickFlash={lastClickFlash}
             lastResult={lastQuantizedResult}
+            onSelectLastCandidate={handleSelectLastNoteCandidate}
+            onStepLastCandidate={handleStepLastNoteCandidate}
           />
           <div
             className="flex items-center justify-between px-3 py-0.5 border-b border-emerald-200 text-[11px] text-slate-800 flex-wrap gap-y-0.5"
@@ -1506,7 +1617,14 @@ export const PianoKeyboardPanel: React.FC<PianoKeyboardPanelProps> = ({
                 <Timer className="w-3 h-3 text-emerald-700" />
                 <span>半リアルタイム操作:</span>
               </span>
-              <span>鍵盤を押している間だけメトロノームとゲージが進み、離した長さの音符を入力</span>
+              <span>鍵盤を押している間だけゲージが伸び、離した長さの音符を入力</span>
+              <span className="text-emerald-300">|</span>
+              <span className="font-bold text-blue-900">
+                入力直後の音長修正:
+                <kbd className="font-mono bg-white border border-blue-300 px-1 rounded text-blue-900 font-bold ml-1">↑</kbd>長く
+                <kbd className="font-mono bg-white border border-blue-300 px-1 rounded text-blue-900 font-bold ml-0.5">↓</kbd>短く
+                <span className="ml-1 font-normal text-slate-700">（またはゲージ上の音符クリック / ホイール）</span>
+              </span>
               <span className="text-emerald-300">|</span>
               <span>
                 <kbd className="font-mono bg-white border border-slate-300 px-1 rounded text-slate-900 font-bold">r</kbd> 休符 ({currentRestValue})

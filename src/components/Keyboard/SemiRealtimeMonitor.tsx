@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import { NoteIcon } from './NoteIcon';
 import {
   computeCandidateZones,
@@ -13,6 +14,9 @@ export interface LastQuantizedResult {
   candidate: SemiRealtimeCandidate;
   elapsedBeats: number;
   elapsedSec: number;
+  midiNote: number;
+  prevOctave: number;
+  canModify: boolean;
 }
 
 export interface SemiRealtimeMonitorProps {
@@ -34,13 +38,17 @@ export interface SemiRealtimeMonitorProps {
   lastClickFlash: { timestamp: number; accent: MetronomeClickAccent } | null;
   /** 直前に確定・挿入された音符の結果 */
   lastResult: LastQuantizedResult | null;
+  /** 直前に確定した音符の長さを指定候補へ直接変更するハンドラ (マウスクリック修正用) */
+  onSelectLastCandidate?: (candidate: SemiRealtimeCandidate) => void;
+  /** 直前に確定した音符の長さを1段階短く(-1) / 長く(+1) 変更するハンドラ (ボタン・上下キー修正用) */
+  onStepLastCandidate?: (stepDelta: -1 | 1) => void;
 }
 
 /**
  * 半リアルタイム入力専用モニターコンポーネント
  * - 左側: クリック周期に完全同期して左右スイングするメトロノーム振り子SVG
- * - 中央: 現在判定中の音符（または直前確定した音符）のリアルタイム表示カード
- * - 右側: 事前設定した音符候補の判定ゾーン・ジャスト位置・現在経過拍数を示すリアルタイムゲージ
+ * - 中央: 現在判定中の音符、および入力直後の音符長を上下ボタンで即座に修正できるカード
+ * - 右側: 押下中にバーが滑らかに伸び、入力直後はクリックで他の音長へ修正できるリアルタイムゲージ
  */
 export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
   isHolding,
@@ -52,6 +60,8 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
   effectiveBpm,
   lastClickFlash,
   lastResult,
+  onSelectLastCandidate,
+  onStepLastCandidate,
 }) => {
   // 判定ゾーンレイアウトの計算
   const { zones, gaugeMaxBeats } = useMemo(
@@ -82,16 +92,35 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
 
   const flashAccent = lastClickFlash?.accent ?? 'quarter';
 
-  // ゲージ進行率 (%)
-  const progressPercent = isHolding
-    ? Math.max(0, Math.min(100, (holdingBeats / gaugeMaxBeats) * 100))
+  // 押下中のリアルタイムゲージ進行率 (%)
+  const holdingProgressPercent = isHolding
+    ? Math.max(2, Math.min(100, (holdingBeats / gaugeMaxBeats) * 100))
     : 0;
 
-  // 直前入力位置のゴーストマーカー位置 (%)
-  const ghostPercent =
+  // 待機中（直前入力あり）の確定音符バー表示率 (%)
+  const settledProgressPercent =
+    !isHolding && lastResult
+      ? Math.max(2, Math.min(100, (lastResult.candidate.beats / gaugeMaxBeats) * 100))
+      : 0;
+
+  // 待機中の実離鍵タイミングマーカー位置 (%)
+  const rawReleasePercent =
     !isHolding && lastResult
       ? Math.max(0, Math.min(99.5, (lastResult.elapsedBeats / gaugeMaxBeats) * 100))
       : null;
+
+  // 直前入力音符が有効候補リストの何番目にあるか (上下ステップボタンの活性制御用)
+  const lastCandidateIndex = useMemo(() => {
+    if (!lastResult) return -1;
+    return zones.findIndex((z) => z.candidate.id === lastResult.candidate.id);
+  }, [lastResult, zones]);
+
+  const canModifyLast = Boolean(!isHolding && lastResult && lastResult.canModify);
+  const canStepShorter = canModifyLast && lastCandidateIndex > 0;
+  const canStepLonger =
+    canModifyLast &&
+    lastCandidateIndex >= 0 &&
+    lastCandidateIndex < zones.length - 1;
 
   // LEDインジケーターの色
   let ledFill = '#cbd5e1';
@@ -106,7 +135,21 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
   return (
     <div
       className="px-3 py-1.5 border-b border-slate-200 flex items-center gap-3 select-none"
-      style={{ backgroundColor: '#f8fafc', opacity: 1, color: '#0f172a' }}
+      onWheel={(e) => {
+        if (canModifyLast && onStepLastCandidate && Math.abs(e.deltaY) > 0) {
+          e.preventDefault();
+          onStepLastCandidate(e.deltaY < 0 ? 1 : -1);
+        }
+      }}
+      style={{
+        backgroundColor: '#f8fafc',
+        opacity: 1,
+        color: '#0f172a',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '6px 12px',
+      }}
     >
       {/* 1. メトロノーム振り子ビジュアライザー (SVG) */}
       <div
@@ -115,7 +158,14 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
             ? 'bg-white border-emerald-400 shadow-xs'
             : 'bg-white border-slate-300'
         }`}
-        style={{ backgroundColor: '#ffffff', opacity: 1 }}
+        style={{
+          backgroundColor: '#ffffff',
+          opacity: 1,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '4px 8px',
+          borderRadius: '8px',
+        }}
         title={
           clickIntervalBeats > 0
             ? `メトロノーム動作: ${effectiveBpm} BPM (振り子が左右の端に届くタイミングでクリック音が鳴ります)`
@@ -205,7 +255,10 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
         </svg>
 
         {/* BPM・動作ステータスミニ表示 */}
-        <div className="hidden sm:flex flex-col justify-center leading-tight pr-0.5">
+        <div
+          className="hidden sm:flex flex-col justify-center leading-tight pr-0.5"
+          style={{ marginLeft: '6px' }}
+        >
           <span
             className={`text-[10px] font-extrabold ${
               isHolding ? 'text-emerald-700' : 'text-slate-500'
@@ -231,16 +284,22 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
         </div>
       </div>
 
-      {/* 2. 現在判定音符 / 直前確定音符カード (幅を固定してゲージの揺れを防止) */}
+      {/* 2. 現在判定音符 / 直前確定音符＆ワンタッチ修正カード */}
       <div
-        className={`w-48 sm:w-52 flex-shrink-0 px-2.5 py-1 rounded-lg border flex flex-col justify-center ${
+        className={`flex-shrink-0 px-2.5 py-1 rounded-lg border flex flex-col justify-center ${
           isHolding
             ? 'border-emerald-500 ring-2 ring-emerald-200'
+            : canModifyLast
+            ? 'border-blue-400 ring-1 ring-blue-100'
             : 'border-slate-300'
         }`}
         style={{
           backgroundColor: isHolding ? '#ecfdf5' : '#ffffff',
           opacity: 1,
+          width: '235px',
+          minHeight: '48px',
+          padding: '4px 10px',
+          borderRadius: '8px',
         }}
       >
         {isHolding ? (
@@ -271,28 +330,61 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
           </>
         ) : lastResult ? (
           <>
-            <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
-              <span>直前の確定音符:</span>
-              <span className="font-mono text-slate-600">
+            <div className="flex items-center justify-between text-[10px] font-bold text-slate-600">
+              <span className={canModifyLast ? 'text-blue-700 font-extrabold' : 'text-slate-500'}>
+                {canModifyLast ? '✏️ 直前音符 (↑↓で修正可):' : '直前の確定音符:'}
+              </span>
+              <span className="font-mono text-slate-500">
                 {lastResult.elapsedBeats.toFixed(2)}拍
               </span>
             </div>
-            <div className="flex items-center space-x-1.5 mt-0.5">
-              <NoteIcon
-                duration={lastResult.candidate.duration}
-                isDotted={lastResult.candidate.isDotted}
-                size={18}
-                className="text-blue-600 flex-shrink-0"
-              />
-              <span className="text-xs font-bold text-slate-800 truncate">
-                {lastResult.candidate.label}
-              </span>
+            <div className="flex items-center justify-between mt-0.5 gap-1">
+              {/* 1段階短くするボタン */}
+              {canModifyLast && (
+                <button
+                  type="button"
+                  disabled={!canStepShorter}
+                  onClick={() => onStepLastCandidate?.(-1)}
+                  className="p-0.5 rounded border border-slate-300 bg-slate-50 hover:bg-blue-50 hover:border-blue-400 text-slate-700 hover:text-blue-700 disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                  style={{ width: '22px', height: '22px', backgroundColor: '#f8fafc' }}
+                  title="直前の音符を1段階短い音符へ変更 (キー: ↓ または ←)"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <div className="flex items-center space-x-1 min-w-0 flex-1">
+                <NoteIcon
+                  duration={lastResult.candidate.duration}
+                  isDotted={lastResult.candidate.isDotted}
+                  size={18}
+                  className="text-blue-600 flex-shrink-0"
+                />
+                <span className="text-xs font-extrabold text-slate-900 truncate">
+                  {lastResult.candidate.label}
+                </span>
+              </div>
+
               <span
-                className="ml-auto text-xs font-mono font-bold px-1.5 py-0.2 rounded border border-slate-300 text-slate-900"
-                style={{ backgroundColor: '#f1f5f9' }}
+                className="text-xs font-mono font-extrabold px-1.5 py-0.2 rounded border border-blue-300 text-blue-950 flex-shrink-0"
+                style={{ backgroundColor: '#eff6ff' }}
               >
                 {lastResult.mml}
               </span>
+
+              {/* 1段階長くするボタン */}
+              {canModifyLast && (
+                <button
+                  type="button"
+                  disabled={!canStepLonger}
+                  onClick={() => onStepLastCandidate?.(1)}
+                  className="p-0.5 rounded border border-slate-300 bg-slate-50 hover:bg-blue-50 hover:border-blue-400 text-slate-700 hover:text-blue-700 disabled:opacity-30 cursor-pointer flex items-center justify-center"
+                  style={{ width: '22px', height: '22px', backgroundColor: '#f8fafc' }}
+                  title="直前の音符を1段階長い音符へ変更 (キー: ↑ または →)"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -305,10 +397,16 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
         )}
       </div>
 
-      {/* 3. リアルタイム音符ゾーンゲージ */}
-      <div className="flex-1 min-w-[200px] flex flex-col justify-center">
-        {/* 上段: 各有効音符のジャスト位置目盛りラベル */}
-        <div className="relative h-5 w-full mb-0.5">
+      {/* 3. リアルタイム音符ゾーンゲージ (押下中バー伸縮アニメーション + クリックで直前音符修正) */}
+      <div
+        className="flex-1 flex flex-col justify-center"
+        style={{ flex: 1, minWidth: '220px' }}
+      >
+        {/* 上段: 各有効音符のジャスト位置目盛りラベル (クリックで直前音符をその長さへ変更可能) */}
+        <div
+          className="relative w-full"
+          style={{ position: 'relative', height: '22px', width: '100%', marginBottom: '2px' }}
+        >
           {zones.map((zone) => {
             const centerPercent = (zone.candidate.beats / gaugeMaxBeats) * 100;
             const isZoneActive = isHolding && activeZone.candidate.id === zone.candidate.id;
@@ -316,15 +414,39 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
               !isHolding && lastResult?.candidate.id === zone.candidate.id;
 
             return (
-              <div
+              <button
                 key={zone.candidate.id}
-                className="absolute bottom-0 flex items-center space-x-0.5 -translate-x-1/2 whitespace-nowrap"
-                style={{ left: `${centerPercent}%` }}
-                title={`${zone.candidate.label} (基準: ${zone.candidate.beats}拍 / 判定範囲: ${zone.minBeats.toFixed(
-                  2
-                )}〜${
-                  Number.isFinite(zone.maxBeats) ? `${zone.maxBeats.toFixed(2)}拍` : '上限なし'
-                })`}
+                type="button"
+                disabled={!canModifyLast}
+                onClick={() => {
+                  if (canModifyLast && onSelectLastCandidate) {
+                    onSelectLastCandidate(zone.candidate);
+                  }
+                }}
+                className={`flex items-center space-x-0.5 whitespace-nowrap rounded px-1 py-0.5 transition-colors ${
+                  canModifyLast ? 'cursor-pointer hover:bg-blue-50' : 'cursor-default'
+                }`}
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: `${centerPercent}%`,
+                  transform: 'translateX(-50%)',
+                  backgroundColor: isZoneActive
+                    ? '#059669'
+                    : isLastMatched
+                    ? '#dbeafe'
+                    : 'transparent',
+                  border: isLastMatched ? '1px solid #60a5fa' : '1px solid transparent',
+                }}
+                title={
+                  canModifyLast
+                    ? `クリックして直前の音符を「${zone.candidate.label} (${zone.candidate.mmlSuffix})」に変更`
+                    : `${zone.candidate.label} (基準: ${zone.candidate.beats}拍 / 判定範囲: ${zone.minBeats.toFixed(
+                        2
+                      )}〜${
+                        Number.isFinite(zone.maxBeats) ? `${zone.maxBeats.toFixed(2)}拍` : '上限なし'
+                      })`
+                }
               >
                 <NoteIcon
                   duration={zone.candidate.duration}
@@ -332,77 +454,135 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
                   size={12}
                   className={
                     isZoneActive
-                      ? 'text-emerald-700'
+                      ? 'text-white'
                       : isLastMatched
-                      ? 'text-blue-600'
-                      : 'text-slate-500'
+                      ? 'text-blue-700'
+                      : 'text-slate-600'
                   }
                 />
                 <span
-                  className={`text-[10px] font-mono leading-none px-0.5 py-0.5 rounded ${
-                    isZoneActive
-                      ? 'bg-emerald-600 text-white font-black shadow-2xs'
+                  className="text-[10px] font-mono leading-none font-bold"
+                  style={{
+                    color: isZoneActive
+                      ? '#ffffff'
                       : isLastMatched
-                      ? 'bg-blue-100 text-blue-800 font-bold border border-blue-300'
-                      : 'text-slate-700 font-bold'
-                  }`}
+                      ? '#1e40af'
+                      : '#334155',
+                  }}
                 >
                   {zone.candidate.gaugeLabel}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
 
-        {/* 下段: ゾーン区切り付きゲージトラック */}
+        {/* 下段: ゾーン区切り付きゲージトラック (高さ26pxをインラインスタイルで完全保証) */}
         <div
-          className="relative h-6 w-full rounded-lg border border-slate-300 overflow-hidden shadow-inner"
-          style={{ backgroundColor: '#e2e8f0', opacity: 1 }}
+          className="relative w-full rounded-lg border border-slate-300 overflow-hidden"
+          style={{
+            position: 'relative',
+            height: '26px',
+            width: '100%',
+            backgroundColor: '#e2e8f0',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1',
+            overflow: 'hidden',
+            opacity: 1,
+          }}
         >
-          {/* 1. 各音符候補の判定ゾーン背景 */}
+          {/* 1. 各音符候補の判定ゾーン背景 (直前音符修正可能時はゾーンクリックでも変更可能) */}
           {zones.map((zone, idx) => {
             const leftPct = (zone.minBeats / gaugeMaxBeats) * 100;
             const widthPct = ((zone.visualMaxBeats - zone.minBeats) / gaugeMaxBeats) * 100;
             const isZoneActive = isHolding && activeZone.candidate.id === zone.candidate.id;
+            const isLastMatched =
+              !isHolding && lastResult?.candidate.id === zone.candidate.id;
 
             return (
               <div
                 key={zone.candidate.id}
-                className="absolute top-0 bottom-0"
+                onClick={() => {
+                  if (canModifyLast && onSelectLastCandidate) {
+                    onSelectLastCandidate(zone.candidate);
+                  }
+                }}
+                className={canModifyLast ? 'cursor-pointer' : ''}
                 style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
                   left: `${leftPct}%`,
                   width: `${widthPct}%`,
                   backgroundColor: isZoneActive
-                    ? '#ecfdf5'
+                    ? '#d1fae5'
+                    : isLastMatched
+                    ? '#eff6ff'
                     : idx % 2 === 0
                     ? '#ffffff'
                     : '#f1f5f9',
                 }}
+                title={
+                  canModifyLast
+                    ? `クリックして直前の音符を「${zone.candidate.label}」に変更`
+                    : `${zone.candidate.label}ゾーン (${zone.minBeats.toFixed(2)}〜${
+                        Number.isFinite(zone.maxBeats) ? `${zone.maxBeats.toFixed(2)}拍` : '最大'
+                      })`
+                }
               />
             );
           })}
 
-          {/* 2. リアルタイム伸縮プログレスバー (60fps追従のためCSSトランジションは付けない・完全不透明) */}
+          {/* 2A. 押下中のリアルタイム伸縮プログレスバー (エメラルドグラデーション) */}
           {isHolding && (
             <div
-              className="absolute top-1 bottom-1 left-0 rounded-r-sm pointer-events-none"
+              className="pointer-events-none"
               style={{
-                width: `${progressPercent}%`,
-                background: 'linear-gradient(90deg, #6ee7b7 0%, #34d399 65%, #10b981 100%)',
+                position: 'absolute',
+                top: '2px',
+                bottom: '2px',
+                left: 0,
+                width: `${holdingProgressPercent}%`,
+                background: 'linear-gradient(90deg, #34d399 0%, #10b981 65%, #059669 100%)',
+                borderRadius: '0 4px 4px 0',
+                boxShadow: '0 0 8px rgba(16, 185, 129, 0.45)',
                 opacity: 1,
               }}
             />
           )}
 
-          {/* 3. ゾーン境界の破線 (プログレスバーの上からくっきり見えるよう描画) */}
+          {/* 2B. 離鍵直後の確定音符長バー (ブルーグラデーション・音長修正時に連動伸縮) */}
+          {!isHolding && lastResult && (
+            <div
+              className="pointer-events-none"
+              style={{
+                position: 'absolute',
+                top: '4px',
+                bottom: '4px',
+                left: 0,
+                width: `${settledProgressPercent}%`,
+                background: 'linear-gradient(90deg, #93c5fd 0%, #3b82f6 100%)',
+                borderRadius: '0 4px 4px 0',
+                opacity: 1,
+              }}
+            />
+          )}
+
+          {/* 3. ゾーン境界の破線 */}
           {zones.map((zone, idx) => {
             if (idx === zones.length - 1) return null;
             const boundaryPct = (zone.visualMaxBeats / gaugeMaxBeats) * 100;
             return (
               <div
                 key={`bound-${zone.candidate.id}`}
-                className="absolute top-0 bottom-0 border-r border-dashed border-slate-400 pointer-events-none"
-                style={{ left: `${boundaryPct}%` }}
+                className="pointer-events-none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${boundaryPct}%`,
+                  borderRight: '1px dashed #94a3b8',
+                }}
               />
             );
           })}
@@ -411,42 +591,59 @@ export const SemiRealtimeMonitor: React.FC<SemiRealtimeMonitorProps> = ({
           {zones.map((zone) => {
             const centerPercent = (zone.candidate.beats / gaugeMaxBeats) * 100;
             const isZoneActive = isHolding && activeZone.candidate.id === zone.candidate.id;
+            const isLastMatched =
+              !isHolding && lastResult?.candidate.id === zone.candidate.id;
             return (
               <div
                 key={`tick-${zone.candidate.id}`}
-                className="absolute top-0 bottom-0 w-0.5 -translate-x-1/2 pointer-events-none"
+                className="pointer-events-none"
                 style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
                   left: `${centerPercent}%`,
-                  backgroundColor: isZoneActive ? '#047857' : '#94a3b8',
+                  width: isZoneActive || isLastMatched ? '2px' : '1px',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: isZoneActive
+                    ? '#065f46'
+                    : isLastMatched
+                    ? '#1d4ed8'
+                    : '#64748b',
                 }}
               />
             );
           })}
 
-          {/* 押下中の現在地ヘッドカーソル */}
+          {/* 5. 押下中の現在地ヘッドカーソル */}
           {isHolding && (
             <div
-              className="absolute top-0 bottom-0 w-1 -translate-x-1/2 pointer-events-none shadow-sm"
+              className="pointer-events-none"
               style={{
-                left: `${progressPercent}%`,
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `${holdingProgressPercent}%`,
+                width: '4px',
+                transform: 'translateX(-50%)',
                 backgroundColor: '#064e3b',
+                borderRadius: '2px',
               }}
             />
           )}
 
-          {/* 待機中の直前確定位置ゴーストマーカー */}
-          {ghostPercent !== null && (
+          {/* 6. 待機中の実離鍵タイミングマーカー (オレンジの細いインジケーター) */}
+          {rawReleasePercent !== null && (
             <div
-              className="absolute top-0 bottom-0 w-0.5 -translate-x-1/2 pointer-events-none"
+              className="pointer-events-none"
               style={{
-                left: `${ghostPercent}%`,
-                backgroundColor: '#2563eb',
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `${rawReleasePercent}%`,
+                width: '2px',
+                transform: 'translateX(-50%)',
+                backgroundColor: '#f59e0b',
               }}
-              title={
-                lastResult
-                  ? `直前の離鍵タイミング: ${lastResult.elapsedBeats.toFixed(2)}拍 (${lastResult.mml})`
-                  : undefined
-              }
             />
           )}
         </div>
