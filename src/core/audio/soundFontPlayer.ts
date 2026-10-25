@@ -1109,6 +1109,60 @@ export class AudioEngine {
   }
 
   /**
+   * 半リアルタイム入力用: メトロノームのクリック音を合成再生
+   * 楽器の持続音と混ざっても聴き取りやすいウッドブロック調の短音クリックを遅延ゼロで発音する
+   */
+  public playMetronomeClick(accent: 'accent' | 'quarter' | 'sub' = 'quarter', volume = 0.8) {
+    const ctx = this.initAudioContext();
+    const now = ctx.currentTime;
+    const clampedVol = Math.max(0, Math.min(1, volume));
+    if (clampedVol <= 0.001) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    let startFreq = 1120;
+    let endFreq = 760;
+    let durationSec = 0.038;
+    let peakGain = clampedVol * 0.36;
+
+    if (accent === 'accent') {
+      startFreq = 1560;
+      endFreq = 1040;
+      durationSec = 0.048;
+      peakGain = clampedVol * 0.46;
+    } else if (accent === 'sub') {
+      startFreq = 780;
+      endFreq = 540;
+      durationSec = 0.028;
+      peakGain = clampedVol * 0.24;
+    }
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(startFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(endFreq, now + durationSec);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(peakGain, now + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // ignore
+      }
+    };
+
+    osc.start(now);
+    osc.stop(now + durationSec + 0.005);
+  }
+
+  /**
    * OfflineAudioContext を使った PCM レンダリング (MP3 書き出し用)
    */
   public async renderOffline(score: ParsedScore): Promise<AudioBuffer> {

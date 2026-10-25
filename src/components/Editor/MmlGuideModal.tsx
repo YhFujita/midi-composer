@@ -279,6 +279,16 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
               エディタ上部の「<strong>楽器選択ボタン</strong>」を押すと、全128音色のGM楽器パレットが開きます。音色をプレビュー試聴し、「<strong>出力</strong>」ボタンまたは上部ツールバーの「<strong>現在の入力場所へ出力</strong>」を押すことで、現在のカーソル位置へ構文ミスなく自動整形されて挿入されます。
             </p>
           </div>
+
+          {/* ピアノエディタ 半リアルタイム入力機能のご案内 */}
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs shadow-sm">
+            <h4 className="font-bold text-emerald-900 flex items-center gap-1.5 mb-1.5 text-xs">
+              ⏱️ ピアノ鍵盤「半リアルタイム入力モード」
+            </h4>
+            <p className="text-slate-700 leading-relaxed font-medium">
+              ピアノ鍵盤パネルで「<strong>半リアルタイム</strong>」を選択すると、鍵盤を押している長さに応じて事前設定した音符候補（16分・8分・付点8分・4分・付点4分・2分・付点2分・全音符など）から最も近い音長が自動で選ばれ入力されます。押している間だけ指定頻度のメトロノーム音・振り子・ゲージが進み、何も押していない間は時間が勝手に進まないため落ち着いて入力できます。休符は事前設定した長さをキーボードの <code className="bg-white px-1 py-0.2 rounded border border-emerald-300 font-mono font-bold">r</code> キーでいつでも挿入できます。
+            </p>
+          </div>
         </div>
 
         {/* モーダルフッター */}

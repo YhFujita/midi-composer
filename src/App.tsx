@@ -132,6 +132,20 @@ export const App: React.FC = () => {
     }
   }, [cursorBeat, parsedScore.timeSignature?.numerator]);
 
+  // カーソル位置に対応するテンポ (BPM)
+  const cursorBpm = useMemo(() => {
+    const tempos = parsedScore.tempoEvents || [];
+    let bpm = 120;
+    for (const ev of tempos) {
+      if (cursorBeat >= ev.time - 0.001) {
+        bpm = ev.bpm;
+      } else {
+        break;
+      }
+    }
+    return bpm;
+  }, [parsedScore.tempoEvents, cursorBeat]);
+
   // カーソル位置のトラック・チャンネル・ドラム判定
   const cursorContext = useMemo(() => {
     try {
@@ -577,8 +591,10 @@ export const App: React.FC = () => {
           onClose={() => setIsKeyboardOpen(false)}
           onInsertText={(text) => editorActionsRef.current?.insertText(text)}
           onBackspace={() => editorActionsRef.current?.deleteBackward()}
+          onUndo={() => editorActionsRef.current?.undo?.()}
           currentProgram={selectedProgram}
           isDrumMode={cursorContext.isDrum}
+          scoreBpm={cursorBpm}
         />
       </ErrorBoundary>
 

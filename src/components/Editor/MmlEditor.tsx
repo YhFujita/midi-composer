@@ -14,6 +14,7 @@ export interface CursorPosition {
 export interface MmlEditorActions {
   insertText: (text: string) => void;
   deleteBackward: () => void;
+  undo?: () => void;
   setPosition?: (lineNumber: number, column: number) => void;
 }
 
@@ -426,6 +427,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       textToInsert = prefix + rawText + suffix;
     }
 
+    // 1音ごとの挿入を独立したUndo単位として記録できるように区切る
+    editor.pushUndoStop();
     editor.executeEdits('text-insert', [
       {
         range: targetRange,
@@ -433,7 +436,16 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
         forceMoveMarkers: true,
       },
     ]);
+    editor.pushUndoStop();
 
+    editor.focus();
+  }, []);
+
+  // 直前の編集操作を元に戻す (Undo)
+  const undoEdit = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.trigger('keyboard', 'undo', null);
     editor.focus();
   }, []);
 
@@ -479,10 +491,11 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
       editorActionsRef.current = {
         insertText: insertTextAtCursor,
         deleteBackward,
+        undo: undoEdit,
         setPosition: setCursorPosition,
       };
     }
-  }, [editorActionsRef, insertTextAtCursor, deleteBackward, setCursorPosition]);
+  }, [editorActionsRef, insertTextAtCursor, deleteBackward, undoEdit, setCursorPosition]);
 
   return (
     <div className="h-full w-full flex flex-col bg-[#13141a] overflow-hidden">
