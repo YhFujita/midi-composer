@@ -126,3 +126,14 @@ export function getTripletInfo(dur: number): {
   return null;
 }
 
+/**
+ * 拍子記号（分子・分母）から1小節あたりの拍数（4分音符基準）を算出する
+ * 例: 4/4 -> 4.0, 3/4 -> 3.0, 6/8 -> 3.0, 12/8 -> 6.0, 2/2 -> 4.0
+ */
+export function getBeatsPerMeasure(timeSig?: { numerator: number; denominator: number }): number {
+  if (!timeSig || !timeSig.numerator || !timeSig.denominator) {
+    return 4.0;
+  }
+  return (timeSig.numerator * 4) / timeSig.denominator;
+}
+

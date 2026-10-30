@@ -18,6 +18,7 @@ import {
   MeasureChordOverride,
 } from '../../core/score/vexflowAdapter';
 import { getInstrumentByProgram } from '../../constants/instruments';
+import { getBeatsPerMeasure } from '../../utils/noteConverter';
 
 interface ChordDisplaySettingsModalProps {
   isOpen: boolean;
@@ -45,7 +46,7 @@ export const ChordDisplaySettingsModal: React.FC<ChordDisplaySettingsModalProps>
   const [newBeatInput, setNewBeatInput] = useState<string>('0.0');
 
   const tracks = score?.tracks || [];
-  const beatsPerMeasure = score?.timeSignature?.numerator || 4;
+  const beatsPerMeasure = getBeatsPerMeasure(score?.timeSignature);
   const totalMeasures = Math.max(
     1,
     Math.ceil(((score?.totalDuration ?? 16)) / beatsPerMeasure)

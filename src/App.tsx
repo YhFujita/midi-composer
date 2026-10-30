@@ -15,6 +15,7 @@ import { audioEngine } from './core/audio/soundFontPlayer';
 import { exportToMp3 } from './core/audio/mp3Exporter';
 import { openMmlFile, openMidiFile, saveMmlFile, downloadBlob } from './utils/fileSystem';
 import { detectCursorContext } from './utils/editorCursor';
+import { getBeatsPerMeasure } from './utils/noteConverter';
 import { PRESET_SONGS } from './constants/presets';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 import { ErrorBoundary } from './components/Common/ErrorBoundary';
@@ -125,12 +126,12 @@ export const App: React.FC = () => {
   // カーソル位置に対応する小節番号 (0-indexed)
   const cursorMeasureIndex = useMemo(() => {
     try {
-      const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
+      const beatsPerMeasure = getBeatsPerMeasure(parsedScore.timeSignature);
       return Math.floor(cursorBeat / beatsPerMeasure);
     } catch {
       return 0;
     }
-  }, [cursorBeat, parsedScore.timeSignature?.numerator]);
+  }, [cursorBeat, parsedScore.timeSignature]);
 
   // カーソル位置に対応するテンポ (BPM)
   const cursorBpm = useMemo(() => {
@@ -173,7 +174,7 @@ export const App: React.FC = () => {
   // 楽譜の小節クリックでエディタカーソルを該当小節へジャンプ移動
   const handleSelectMeasure = useCallback(
     (measureIndex: number) => {
-      const beatsPerMeasure = parsedScore.timeSignature?.numerator || 4;
+      const beatsPerMeasure = getBeatsPerMeasure(parsedScore.timeSignature);
       const targetBeat = measureIndex * beatsPerMeasure;
       const items = parsedScore.timelineItems || [];
       const item = items.find((it) => it.beat >= targetBeat - 0.01) || items[items.length - 1];

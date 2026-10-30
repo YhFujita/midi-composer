@@ -21,6 +21,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { getInstrumentByProgram } from '../../constants/instruments';
+import { getBeatsPerMeasure } from '../../utils/noteConverter';
 import { ChordDisplaySettingsModal } from './ChordDisplaySettingsModal';
 
 interface SheetMusicProps {
@@ -213,7 +214,7 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const beatsPerMeasure = score.timeSignature.numerator || 4;
+    const beatsPerMeasure = getBeatsPerMeasure(score.timeSignature);
     // 再生中は再生位置、停止中はエディタカーソル位置
     const activeMeasure = isPlaying
       ? Math.floor(currentBeat / beatsPerMeasure)
@@ -272,7 +273,7 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({
     }, 60);
   };
 
-  const currentMeasure = Math.floor(currentBeat / (score.timeSignature.numerator || 4)) + 1;
+  const currentMeasure = Math.floor(currentBeat / getBeatsPerMeasure(score.timeSignature)) + 1;
   const activeTrack = score.tracks[selectedTrack] || score.tracks[0];
   const activeInst = activeTrack ? getInstrumentByProgram(activeTrack.instrument) : null;
 

@@ -1,5 +1,5 @@
 import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
-import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo } from '../../utils/noteConverter';
+import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 import { parseKeySignature, KeySignatureInfo, getDefaultKeySignature } from '../../utils/keySignature';
 
 interface TrackState {
@@ -401,11 +401,12 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       }
 
       if (rehearsalMarkText) {
-        const timeSigNumerator = currentTrack.timeSignatureEvents[0]?.numerator || timeSignatures[0]?.numerator || 4;
+        const activeTimeSig = currentTrack.timeSignatureEvents[0] || timeSignatures[0] || { numerator: 4, denominator: 4 };
+        const markBeatsPerMeasure = getBeatsPerMeasure(activeTimeSig);
         const markEvent: RehearsalMarkEvent = {
           time: currentTrack.currentTime,
           text: rehearsalMarkText,
-          measureIndex: Math.floor(currentTrack.currentTime / timeSigNumerator),
+          measureIndex: Math.floor(currentTrack.currentTime / markBeatsPerMeasure),
           trackId: currentTrack.id,
           line: lineNumber,
           column: col + 1,

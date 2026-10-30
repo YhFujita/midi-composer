@@ -17,7 +17,7 @@ import {
 } from 'vexflow';
 import { ParsedScore, Track, NoteEvent, PedalEvent, KeySignatureEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
-import { getTripletInfo } from '../../utils/noteConverter';
+import { getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 
 import { detectChordsForMeasure, ChordDetectionGranularity, MeasureChordInfo } from './chordDetector';
 
@@ -74,7 +74,7 @@ export function getChordTargetNotesForMeasure(
   const tracks = score.tracks;
   if (!tracks || tracks.length === 0) return [];
 
-  const beatsPerMeasure = score.timeSignature?.numerator || 4;
+  const beatsPerMeasure = getBeatsPerMeasure(score.timeSignature);
   const measureStartBeat = measureIndex * beatsPerMeasure;
   const measureEndBeat = measureStartBeat + beatsPerMeasure;
 
@@ -809,7 +809,7 @@ export function renderScoreToSvg(
   const inst = getInstrumentByProgram(track.instrument);
   const trackTempo = track.initialTempo || score.tempoEvents[0]?.bpm || 120;
   const trackTimeSig = track.initialTimeSignature || score.timeSignature;
-  const beatsPerMeasure = trackTimeSig.numerator || 4;
+  const beatsPerMeasure = getBeatsPerMeasure(trackTimeSig);
 
   // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
   if (options.showTitle) {
@@ -979,16 +979,19 @@ export function renderScoreToSvg(
       if (vexNotes.length > 0) {
         try {
           const voice = new Voice({
-            numBeats: score.timeSignature.numerator,
-            beatValue: score.timeSignature.denominator,
+            numBeats: trackTimeSig.numerator,
+            beatValue: trackTimeSig.denominator,
           }).setMode(Voice.Mode.SOFT);
 
           voice.addTickables(vexNotes);
 
-          // 先に Beam を生成して Note にアタッチ（旗の重複バグ防止）
+          // 先に Beam を生成して Note にアタッチ（拍子記号に応じたビームグループ設定）
           let beams: Beam[] = [];
           try {
-            beams = Beam.generateBeams(vexNotes);
+            const timeSigStr = `${trackTimeSig.numerator}/${trackTimeSig.denominator}`;
+            beams = Beam.generateBeams(vexNotes, {
+              groups: Beam.getDefaultBeamGroups(timeSigStr),
+            });
           } catch {
             // ignore
           }
@@ -1062,7 +1065,7 @@ export function renderFullScoreToSvg(
 
   const globalTempo = score.tempoEvents[0]?.bpm || 120;
   const globalTimeSig = score.timeSignature;
-  const beatsPerMeasure = globalTimeSig.numerator || 4;
+  const beatsPerMeasure = getBeatsPerMeasure(globalTimeSig);
 
   // 1. 楽譜タイトル・ヘッダー（表示オプション有効時）
   if (options.showTitle) {
@@ -1087,7 +1090,7 @@ export function renderFullScoreToSvg(
         <span class="text-slate-400">|</span>
         <span>拍子: ${globalTimeSig.numerator}/${globalTimeSig.denominator}</span>
         <span class="text-slate-400">|</span>
-        <span>総小節数: ${Math.ceil(score.totalDuration / (globalTimeSig.numerator || 4))}</span>
+        <span>総小節数: ${Math.ceil(score.totalDuration / beatsPerMeasure)}</span>
       `;
       headerDiv.appendChild(sub);
     }
@@ -1296,16 +1299,19 @@ export function renderFullScoreToSvg(
         if (vexNotes.length > 0) {
           try {
             const voice = new Voice({
-              numBeats: score.timeSignature.numerator,
-              beatValue: score.timeSignature.denominator,
+              numBeats: trackSig.numerator,
+              beatValue: trackSig.denominator,
             }).setMode(Voice.Mode.SOFT);
 
             voice.addTickables(vexNotes);
 
-            // 先に Beam を生成してアタッチ
+            // 先に Beam を生成してアタッチ（拍子記号に応じたビームグループ設定）
             let beams: Beam[] = [];
             try {
-              beams = Beam.generateBeams(vexNotes);
+              const timeSigStr = `${trackSig.numerator}/${trackSig.denominator}`;
+              beams = Beam.generateBeams(vexNotes, {
+                groups: Beam.getDefaultBeamGroups(timeSigStr),
+              });
             } catch {
               // ignore
             }
