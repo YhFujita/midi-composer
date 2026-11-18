@@ -39,7 +39,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
   const errors: ParseError[] = [];
   const tracksMap = new Map<number, TrackState>();
   const timelineItems: MmlTimelineItem[] = [];
-  const tempoEvents: TempoEvent[] = [{ time: 0, bpm: 120 }];
+  const tempoEvents: TempoEvent[] = [];
   const timeSignatures: TimeSignatureEvent[] = [{ time: 0, numerator: 4, denominator: 4 }];
   const masterKeyEvents: MasterKeyEvent[] = [{ time: 0, shift: 0 }];
   const scoreKeySignatureEvents: KeySignatureEvent[] = [];
@@ -597,33 +597,54 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       }
 
       // 4. テンポ: Tempo(n), TEMPO=n, t(n), tn
-      const tempoMatch = remaining.match(/^(?:TEMPO\(?=?\s*(\d+)\)?|t\s*(\d+))/i);
+      const tempoMatch = remaining.match(/^(?:TEMPO(?:\s*\(\s*|\s*=\s*|\s*)(\d+)\s*\)?|t(?:\s*\(\s*|\s*=\s*|\s*)(\d+)\s*\)?)/i);
       if (tempoMatch) {
         const bpm = parseInt(tempoMatch[1] || tempoMatch[2], 10);
         if (bpm >= 20 && bpm <= 400) {
-          const tEvent = {
-            time: currentTrack.currentTime,
-            bpm,
-          };
-          tempoEvents.push(tEvent);
-          currentTrack.tempoEvents.push(tEvent);
+          const curTime = currentTrack.currentTime;
+          // 全体テンポイベント（同一時刻があれば上書き）
+          const existingGlobal = tempoEvents.find((ev) => Math.abs(ev.time - curTime) < 0.001);
+          if (existingGlobal) {
+            existingGlobal.bpm = bpm;
+          } else {
+            tempoEvents.push({ time: curTime, bpm });
+          }
+
+          // トラック個別テンポイベント（同一時刻があれば上書き）
+          const existingTrack = currentTrack.tempoEvents.find((ev) => Math.abs(ev.time - curTime) < 0.001);
+          if (existingTrack) {
+            existingTrack.bpm = bpm;
+          } else {
+            currentTrack.tempoEvents.push({ time: curTime, bpm });
+          }
         }
         col += tempoMatch[0].length;
         continue;
       }
 
       // 5. 拍子: TimeSignature(4,4), Time(4,4)
-      const timeSigMatch = remaining.match(/^(?:TIME(?:SIGNATURE)?\(\s*(\d+)\s*,\s*(\d+)\s*\))/i);
+      const timeSigMatch = remaining.match(/^(?:TIME(?:SIGNATURE)?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\))/i);
       if (timeSigMatch) {
         const num = parseInt(timeSigMatch[1], 10);
         const den = parseInt(timeSigMatch[2], 10);
-        const sigEvent = {
-          time: currentTrack.currentTime,
-          numerator: num,
-          denominator: den,
-        };
-        timeSignatures.push(sigEvent);
-        currentTrack.timeSignatureEvents.push(sigEvent);
+        const curTime = currentTrack.currentTime;
+
+        const existingGlobalSig = timeSignatures.find((ev) => Math.abs(ev.time - curTime) < 0.001);
+        if (existingGlobalSig) {
+          existingGlobalSig.numerator = num;
+          existingGlobalSig.denominator = den;
+        } else {
+          timeSignatures.push({ time: curTime, numerator: num, denominator: den });
+        }
+
+        const existingTrackSig = currentTrack.timeSignatureEvents.find((ev) => Math.abs(ev.time - curTime) < 0.001);
+        if (existingTrackSig) {
+          existingTrackSig.numerator = num;
+          existingTrackSig.denominator = den;
+        } else {
+          currentTrack.timeSignatureEvents.push({ time: curTime, numerator: num, denominator: den });
+        }
+
         col += timeSigMatch[0].length;
         continue;
       }
@@ -1476,6 +1497,11 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         maxDuration = end;
       }
     }
+  }
+
+  // テンポ指定が一度もなかった場合はデフォルト 120 BPM を設定
+  if (tempoEvents.length === 0) {
+    tempoEvents.push({ time: 0, bpm: 120 });
   }
 
   const activeTimeSig = timeSignatures[timeSignatures.length - 1] || { numerator: 4, denominator: 4 };

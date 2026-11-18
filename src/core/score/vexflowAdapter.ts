@@ -18,6 +18,7 @@ import {
 import { ParsedScore, Track, NoteEvent, RestEvent, PedalEvent, KeySignatureEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 import { getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
+import { parseKeySignature } from '../../utils/keySignature';
 
 import { detectChordsForMeasure, ChordDetectionGranularity, MeasureChordInfo } from './chordDetector';
 
@@ -158,10 +159,15 @@ export function getKeySignatureAtBeat(
   keyEvents: KeySignatureEvent[] | undefined,
   defaultKey: string | undefined,
   beat: number
-): { name: string; vexKey: string } {
+): { name: string; vexKey: string; sharpsFlats: number } {
   const fallback = defaultKey || 'C';
   if (!keyEvents || keyEvents.length === 0) {
-    return { name: fallback, vexKey: fallback };
+    const parsed = parseKeySignature(fallback);
+    return {
+      name: fallback,
+      vexKey: parsed ? parsed.vexKey : fallback,
+      sharpsFlats: parsed ? parsed.accidentalsCount : 0,
+    };
   }
   let active = keyEvents[0];
   for (const ev of keyEvents) {
@@ -171,7 +177,11 @@ export function getKeySignatureAtBeat(
       break;
     }
   }
-  return { name: active.key, vexKey: active.vexKey };
+  return {
+    name: active.key,
+    vexKey: active.vexKey,
+    sharpsFlats: active.sharpsFlats ?? 0,
+  };
 }
 
 /**
@@ -865,6 +875,64 @@ function getTrackClef(track: Track): string {
 }
 
 /**
+ * 小節内の有効音符幅（stave.getNoteStartX() 〜 stave.getNoteEndX()）に合わせて Voice をフォーマットし、
+ * 調号（#や♭）が多い場合や16分音符等が密集している場合でも、右端の小節線を越えてはみ出さないよう
+ * TickContext のX座標を自動スケーリングして小節内に収める
+ */
+function formatVoiceToFitStave(
+  ctx: any,
+  voice: Voice,
+  stave: Stave,
+  vexNotes: StaveNote[],
+  measureItems: VexMeasureItem[]
+): void {
+  const noteStartX = stave.getNoteStartX();
+  const noteEndX = stave.getNoteEndX();
+
+  // 最後の音符が次の小節へ向かうタイを持つ場合は、タイの弧のスペースを確保するため右余白を広めにとる
+  const lastItem = measureItems[measureItems.length - 1];
+  const hasTrailingTie =
+    lastItem && !lastItem.isRest && lastItem.noteEvents.some((n) => n.hasTieToNext);
+  const rightMargin = hasTrailingTie ? 30 : 20;
+
+  const availableWidth = Math.max(40, noteEndX - noteStartX - rightMargin);
+
+  const formatter = new Formatter().joinVoices([voice]);
+  formatter.format([voice], availableWidth, { context: ctx });
+
+  // VexFlow の Formatter は最小幅 (minTotalWidth) が availableWidth を超えると
+  // availableWidth を無視して右側の小節線の外へはみ出すため、TickContext のX座標を検査して自動圧縮する
+  const tickContexts = formatter.getTickContexts()?.array || [];
+  if (tickContexts.length > 0) {
+    let minLeftX = Infinity;
+    let maxRightEdge = -Infinity;
+
+    for (const tc of tickContexts) {
+      const tx = tc.getX();
+      const metrics = tc.getMetrics();
+      const leftEdge = tx - (metrics.totalLeftPx || 0);
+      const rightEdge = tx + (metrics.notePx || 12) + (metrics.totalRightPx || 0);
+      if (leftEdge < minLeftX) minLeftX = leftEdge;
+      if (rightEdge > maxRightEdge) maxRightEdge = rightEdge;
+    }
+
+    const maxAllowedRightEdge = Math.max(30, noteEndX - noteStartX - (hasTrailingTie ? 22 : 12));
+    if (maxRightEdge > maxAllowedRightEdge) {
+      const anchorX = Math.max(0, isFinite(minLeftX) ? minLeftX : 0);
+      const currentSpan = maxRightEdge - anchorX;
+      const targetSpan = Math.max(20, maxAllowedRightEdge - anchorX);
+      if (currentSpan > 0 && targetSpan < currentSpan) {
+        const scale = targetSpan / currentSpan;
+        for (const tc of tickContexts) {
+          const oldX = tc.getX();
+          tc.setX(anchorX + (oldX - anchorX) * scale);
+        }
+      }
+    }
+  }
+}
+
+/**
  * リハーサルマーク（構成記号: 🄰, 🄱, [Intro], [Chorus] 等）を描画するヘルパー
  * 角丸四角枠（Box）に太字文字で、五線や他の記号と重ならず目立つよう描画
  * @returns 描画されたマークボックスの横幅
@@ -989,12 +1057,14 @@ export function renderScoreToSvg(
   const measureGroups = groupNotesByMeasure(track, beatsPerMeasure);
 
   const measuresPerRow = containerWidth > 900 ? 3 : containerWidth > 600 ? 2 : 1;
-  const staveWidth = Math.floor((containerWidth - 40) / measuresPerRow);
+  const totalRowStavesWidth = containerWidth - 40;
   // コードネームや低音加線・高音加線が切れないよう、十分な高さを確保 (165px)
   const staveHeight = 165;
   const rowCount = Math.ceil(measureGroups.length / measuresPerRow);
 
   const defaultClef = getTrackClef(track);
+  const trackKeyEvents = track.keySignatureEvents || score.keySignatureEvents;
+  const trackInitialKey = track.initialKeySignature || score.initialKeySignature;
 
   // 段（System / Row）ごとに個別 div & SVG を生成（改ページ完全対応）
   for (let r = 0; r < rowCount; r++) {
@@ -1016,19 +1086,64 @@ export function renderScoreToSvg(
       svgElem.style.overflow = 'visible';
     }
 
+    // この段の各小節に割り当てる横幅を算出（左端小節のト音記号・調号・拍子記号による押し出し分を補正）
+    const extraWidths: number[] = [];
+    for (let c = 0; c < measuresPerRow; c++) {
+      const idx = r * measuresPerRow + c;
+      if (idx >= measureGroups.length) {
+        extraWidths.push(0);
+        continue;
+      }
+      const mGroup = measureGroups[idx];
+      const curBeat = mGroup.measureIndex * beatsPerMeasure;
+      const prevBeat = idx > 0 ? measureGroups[idx - 1].measureIndex * beatsPerMeasure : -1;
+      const curKey = getKeySignatureAtBeat(trackKeyEvents, trackInitialKey, curBeat);
+      const prevKey = prevBeat >= 0 ? getKeySignatureAtBeat(trackKeyEvents, trackInitialKey, prevBeat) : null;
+      const isKeyChanged = prevKey !== null && prevKey.name !== curKey.name;
+      const keyAccCount = options.showKeySignature !== false ? Math.abs(curKey.sharpsFlats) : 0;
+
+      let extra = 0;
+      if (c === 0) {
+        extra += 34 + keyAccCount * 9;
+        if (r === 0 && options.showTimeSignature) {
+          extra += 22;
+        }
+      } else if (isKeyChanged) {
+        extra += keyAccCount * 9;
+      }
+      extraWidths.push(extra);
+    }
+
+    const totalExtra = Math.min(
+      totalRowStavesWidth * 0.35,
+      extraWidths.reduce((sum, w) => sum + w, 0)
+    );
+    const rawExtraSum = extraWidths.reduce((sum, w) => sum + w, 0);
+    const extraScale = rawExtraSum > 0 ? totalExtra / rawExtraSum : 0;
+    const baseNoteMeasureWidth = (totalRowStavesWidth - totalExtra) / measuresPerRow;
+
+    const colWidths: number[] = [];
+    const colXs: number[] = [];
+    let runningX = 20;
+    for (let c = 0; c < measuresPerRow; c++) {
+      const w = Math.floor(baseNoteMeasureWidth + extraWidths[c] * extraScale);
+      colXs.push(runningX);
+      colWidths.push(w);
+      runningX += w;
+    }
+
     for (let c = 0; c < measuresPerRow; c++) {
       const idx = r * measuresPerRow + c;
       if (idx >= measureGroups.length) break;
 
       const mGroup = measureGroups[idx];
-      const x = 20 + c * staveWidth;
+      const x = colXs[c];
+      const staveWidth = colWidths[c];
       const y = 45; // 上部余白を確保してヘッダー、コード表示、テンポ表示を保護
 
       const stave = new Stave(x, y, staveWidth);
 
       // 調号（Key Signature）および転調の判定
-      const trackKeyEvents = track.keySignatureEvents || score.keySignatureEvents;
-      const trackInitialKey = track.initialKeySignature || score.initialKeySignature;
       const curBeat = mGroup.measureIndex * beatsPerMeasure;
       const prevBeat = idx > 0 ? measureGroups[idx - 1].measureIndex * beatsPerMeasure : -1;
       const curKey = getKeySignatureAtBeat(trackKeyEvents, trackInitialKey, curBeat);
@@ -1098,12 +1213,12 @@ export function renderScoreToSvg(
           ctx.setFont('sans-serif', 11.5, 'bold');
           ctx.setFillStyle('#1d4ed8');
 
-          const startPad = c === 0 ? 65 : 18;
-          const usableWidth = staveWidth - startPad - 15;
+          const chordStartX = stave.getNoteStartX() + 8;
+          const usableWidth = Math.max(30, stave.getNoteEndX() - chordStartX - 16);
 
           chords.forEach((ci) => {
             const beatRatio = Math.max(0, Math.min(1, ci.beatOffset / beatsPerMeasure));
-            const chordX = x + startPad + usableWidth * beatRatio;
+            const chordX = chordStartX + usableWidth * beatRatio;
             let chordY = y - 10;
             if (r === 0 && c === 0 && options.showTempo && ci.beatOffset < 1.0) {
               chordY = y - 24;
@@ -1144,7 +1259,7 @@ export function renderScoreToSvg(
             // ignore
           }
 
-          new Formatter().joinVoices([voice]).format([voice], staveWidth - (c === 0 ? 80 : 30));
+          formatVoiceToFitStave(ctx, voice, stave, vexNotes, measureItems);
 
           voice.draw(ctx, stave);
           beams.forEach((b) => b.setContext(ctx).draw());
@@ -1266,7 +1381,7 @@ export function renderFullScoreToSvg(
   const measuresPerRow = containerWidth > 750 ? 2 : 1;
 
   const leftMargin = partNameMode === 'multilineJa' ? 95 : partNameMode === 'trackOnly' ? 45 : 75;
-  const staveWidth = Math.floor((containerWidth - leftMargin - 25) / measuresPerRow);
+  const totalRowStavesWidth = containerWidth - leftMargin - 25;
 
   // 1パートあたりの高さを 125px に設定、上部コード余白を考慮して systemHeight を調整
   const trackStaveHeight = 125;
@@ -1294,11 +1409,69 @@ export function renderFullScoreToSvg(
       svgElem.style.overflow = 'visible';
     }
 
+    // この段の各小節に割り当てる横幅を算出（左端小節の音部記号・調号・拍子記号による押し出し分を補正）
+    const extraWidths: number[] = [];
+    for (let c = 0; c < measuresPerRow; c++) {
+      const mIdx = r * measuresPerRow + c;
+      if (mIdx >= totalMeasures) {
+        extraWidths.push(0);
+        continue;
+      }
+      const curBeat = mIdx * beatsPerMeasure;
+      const prevBeat = mIdx > 0 ? (mIdx - 1) * beatsPerMeasure : -1;
+
+      // 全トラック中の最大調号数を確認
+      let maxKeyAccCount = 0;
+      let anyKeyChanged = false;
+      tracks.forEach((tr) => {
+        const tkEvents = tr.keySignatureEvents || score.keySignatureEvents;
+        const tkInit = tr.initialKeySignature || score.initialKeySignature;
+        const ck = getKeySignatureAtBeat(tkEvents, tkInit, curBeat);
+        const pk = prevBeat >= 0 ? getKeySignatureAtBeat(tkEvents, tkInit, prevBeat) : null;
+        if (options.showKeySignature !== false) {
+          maxKeyAccCount = Math.max(maxKeyAccCount, Math.abs(ck.sharpsFlats));
+        }
+        if (pk !== null && pk.name !== ck.name) {
+          anyKeyChanged = true;
+        }
+      });
+
+      let extra = 0;
+      if (c === 0) {
+        extra += 34 + maxKeyAccCount * 9;
+        if (r === 0 && options.showTimeSignature) {
+          extra += 22;
+        }
+      } else if (anyKeyChanged) {
+        extra += maxKeyAccCount * 9;
+      }
+      extraWidths.push(extra);
+    }
+
+    const totalExtra = Math.min(
+      totalRowStavesWidth * 0.35,
+      extraWidths.reduce((sum, w) => sum + w, 0)
+    );
+    const rawExtraSum = extraWidths.reduce((sum, w) => sum + w, 0);
+    const extraScale = rawExtraSum > 0 ? totalExtra / rawExtraSum : 0;
+    const baseNoteMeasureWidth = (totalRowStavesWidth - totalExtra) / measuresPerRow;
+
+    const colWidths: number[] = [];
+    const colXs: number[] = [];
+    let runningX = leftMargin;
+    for (let c = 0; c < measuresPerRow; c++) {
+      const w = Math.floor(baseNoteMeasureWidth + extraWidths[c] * extraScale);
+      colXs.push(runningX);
+      colWidths.push(w);
+      runningX += w;
+    }
+
     for (let c = 0; c < measuresPerRow; c++) {
       const mIdx = r * measuresPerRow + c;
       if (mIdx >= totalMeasures) break;
 
-      const x = leftMargin + c * staveWidth;
+      const x = colXs[c];
+      const staveWidth = colWidths[c];
       const stavesInMeasure: Stave[] = [];
 
       tracks.forEach((track, tIdx) => {
@@ -1423,12 +1596,12 @@ export function renderFullScoreToSvg(
             ctx.setFont('sans-serif', 11.5, 'bold');
             ctx.setFillStyle('#1d4ed8');
 
-            const startPad = c === 0 ? 65 : 18;
-            const usableWidth = staveWidth - startPad - 15;
+            const chordStartX = stave.getNoteStartX() + 8;
+            const usableWidth = Math.max(30, stave.getNoteEndX() - chordStartX - 16);
 
             chords.forEach((ci) => {
               const beatRatio = Math.max(0, Math.min(1, ci.beatOffset / beatsPerMeasure));
-              const chordX = x + startPad + usableWidth * beatRatio;
+              const chordX = chordStartX + usableWidth * beatRatio;
               let chordY = staveY - 10;
               if (r === 0 && c === 0 && options.showTempo && ci.beatOffset < 1.0) {
                 chordY = staveY - 24;
@@ -1464,7 +1637,7 @@ export function renderFullScoreToSvg(
               // ignore
             }
 
-            new Formatter().joinVoices([voice]).format([voice], staveWidth - (c === 0 ? 80 : 30));
+            formatVoiceToFitStave(ctx, voice, stave, vexNotes, measureItems);
 
             voice.draw(ctx, stave);
             beams.forEach((b) => b.setContext(ctx).draw());
