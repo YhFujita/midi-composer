@@ -15,7 +15,7 @@ import {
   CurvePosition,
   Tuplet,
 } from 'vexflow';
-import { ParsedScore, Track, NoteEvent, PedalEvent, KeySignatureEvent } from '../../types/mml';
+import { ParsedScore, Track, NoteEvent, RestEvent, PedalEvent, KeySignatureEvent } from '../../types/mml';
 import { getInstrumentByProgram } from '../../constants/instruments';
 import { getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 
@@ -207,6 +207,89 @@ export function durationToVexDuration(dur: number): { duration: string; isDotted
   return { duration: '16', isDotted: false };
 }
 
+export interface VexDurationPart {
+  duration: string;
+  isDotted: boolean;
+  beats: number;
+}
+
+/**
+ * 4分音符基準の長さ (dur) を、拍数を一切失わずに表現できる1つ以上の VexFlow 音長コード配列に分解する
+ * 例:
+ *   1.0  -> [{ duration: 'q', isDotted: false, beats: 1.0 }]
+ *   0.25 -> [{ duration: '16', isDotted: false, beats: 0.25 }]
+ *   1.25 -> [{ duration: 'q', isDotted: false, beats: 1.0 }, { duration: '16', isDotted: false, beats: 0.25 }]
+ */
+export function splitDurationIntoVexRests(dur: number): VexDurationPart[] {
+  // 1. 3連符などの連符長に単一で一致する場合
+  const trip = getTripletInfo(dur);
+  if (trip) {
+    const vexCode = trip.vexDuration === '4' ? 'q' : (trip.vexDuration === '2' ? 'h' : trip.vexDuration);
+    return [{ duration: vexCode, isDotted: false, beats: dur }];
+  }
+
+  const standardTable: VexDurationPart[] = [
+    { duration: 'wd', isDotted: true, beats: 6.0 },
+    { duration: 'w', isDotted: false, beats: 4.0 },
+    { duration: 'hd', isDotted: true, beats: 3.0 },
+    { duration: 'h', isDotted: false, beats: 2.0 },
+    { duration: 'qd', isDotted: true, beats: 1.5 },
+    { duration: 'q', isDotted: false, beats: 1.0 },
+    { duration: '8d', isDotted: true, beats: 0.75 },
+    { duration: '8', isDotted: false, beats: 0.5 },
+    { duration: '16d', isDotted: true, beats: 0.375 },
+    { duration: '16', isDotted: false, beats: 0.25 },
+    { duration: '32', isDotted: false, beats: 0.125 },
+  ];
+
+  const exactEps = 0.03;
+  for (const item of standardTable) {
+    if (Math.abs(dur - item.beats) < exactEps) {
+      return [item];
+    }
+  }
+
+  // 単一音長で一致しない複合長（例: 1.25 = 4分+16分, 1.75 = 4分+付点8分 等）を分解
+  // 拍の区切りが明確になるよう基本音長と小単位付点を優先して組み合わせる
+  const decompositionTable: VexDurationPart[] = [
+    { duration: 'w', isDotted: false, beats: 4.0 },
+    { duration: 'h', isDotted: false, beats: 2.0 },
+    { duration: 'q', isDotted: false, beats: 1.0 },
+    { duration: '8d', isDotted: true, beats: 0.75 },
+    { duration: '8', isDotted: false, beats: 0.5 },
+    { duration: '16d', isDotted: true, beats: 0.375 },
+    { duration: '16', isDotted: false, beats: 0.25 },
+    { duration: '32', isDotted: false, beats: 0.125 },
+  ];
+
+  const result: VexDurationPart[] = [];
+  let rem = dur;
+
+  while (rem > 0.06) {
+    let matched = false;
+    for (const item of decompositionTable) {
+      if (rem >= item.beats - exactEps) {
+        result.push(item);
+        rem -= item.beats;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      result.push({ duration: '32', isDotted: false, beats: 0.125 });
+      break;
+    }
+    if (result.length >= 8) break;
+  }
+
+  if (result.length === 0) {
+    const fallback = durationToVexDuration(dur);
+    return [{ ...fallback, beats: dur }];
+  }
+
+  return result;
+}
+
 export interface MeasureNoteGroup {
   measureIndex: number;
   notes: NoteEvent[];
@@ -246,6 +329,7 @@ export interface VexMeasureItem {
   staveNote: StaveNote;
   noteEvents: NoteEvent[];
   isRest: boolean;
+  restEvent?: RestEvent;
 }
 
 export interface VexMeasureOutput {
@@ -262,15 +346,116 @@ export function createVexNotesForMeasure(
   measureIndex: number,
   beatsPerMeasure: number,
   clef: string,
-  pedalEvents?: PedalEvent[]
+  pedalEvents?: PedalEvent[],
+  rests?: RestEvent[]
 ): VexMeasureOutput {
   const vexNotes: StaveNote[] = [];
   const items: VexMeasureItem[] = [];
   const measureStartBeat = measureIndex * beatsPerMeasure;
   let currentBeatInMeasure = 0;
 
-  // 音符がない場合は小節全休符を挿入
+  // 小節内の相対拍区間 [gapStart, gapEnd] に対して休符 StaveNote を生成して追加するヘルパー
+  const appendRestsForRange = (gapStart: number, gapEnd: number) => {
+    const totalGap = gapEnd - gapStart;
+    if (totalGap <= 0.04) return;
+
+    const absStart = measureStartBeat + gapStart;
+    const absEnd = measureStartBeat + gapEnd;
+
+    // この空白区間に重なる明示的な RestEvent を抽出
+    const overlappingRests = (rests || [])
+      .filter((r) => r.startTime < absEnd - 0.02 && r.startTime + r.duration > absStart + 0.02)
+      .sort((a, b) => a.startTime - b.startTime);
+
+    interface RestSegment {
+      relStart: number;
+      duration: number;
+      restEvent?: RestEvent;
+    }
+
+    const segments: RestSegment[] = [];
+
+    if (overlappingRests.length > 0) {
+      let cursor = gapStart;
+      for (const r of overlappingRests) {
+        const rRelStart = Math.max(cursor, r.startTime - measureStartBeat);
+        const rRelEnd = Math.min(gapEnd, r.startTime + r.duration - measureStartBeat);
+
+        if (rRelStart - cursor > 0.04) {
+          segments.push({ relStart: cursor, duration: rRelStart - cursor });
+          cursor = rRelStart;
+        }
+
+        if (rRelEnd - rRelStart > 0.04) {
+          segments.push({ relStart: rRelStart, duration: rRelEnd - rRelStart, restEvent: r });
+          cursor = rRelEnd;
+        }
+      }
+      if (gapEnd - cursor > 0.04) {
+        segments.push({ relStart: cursor, duration: gapEnd - cursor });
+      }
+    } else {
+      segments.push({ relStart: gapStart, duration: totalGap });
+    }
+
+    for (const seg of segments) {
+      const vexParts = seg.restEvent?.isTuplet
+        ? [{ ...durationToVexDuration(seg.duration), beats: seg.duration }]
+        : splitDurationIntoVexRests(seg.duration);
+
+      let subCursor = seg.relStart;
+      for (const part of vexParts) {
+        const restNote = new StaveNote({
+          clef,
+          keys: [clef === 'bass' ? 'd/3' : 'b/4'],
+          duration: `${part.duration.replace('d', '')}r`,
+        });
+        if (part.isDotted) {
+          Dot.buildAndAttach([restNote], { all: true });
+        }
+
+        // 休符のタイミングにペダルOFFがあれば ✱ を付与
+        if (pedalEvents && pedalEvents.length > 0) {
+          const hasPedalOff = pedalEvents.some(
+            (p) => p.type === 'off' && Math.abs(p.time - (measureStartBeat + subCursor)) < 0.05
+          );
+          if (hasPedalOff) {
+            try {
+              const relAnn = new Annotation('✱').setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
+              restNote.addModifier(relAnn, 0);
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        vexNotes.push(restNote);
+        items.push({
+          staveNote: restNote,
+          noteEvents: [],
+          isRest: true,
+          restEvent: seg.restEvent,
+        });
+        subCursor += part.beats;
+      }
+    }
+  };
+
+  // 音符がない場合
   if (!notes || notes.length === 0) {
+    const absMeasureEnd = measureStartBeat + beatsPerMeasure;
+    const measureExplicitRests = (rests || []).filter(
+      (r) => r.startTime < absMeasureEnd - 0.02 && r.startTime + r.duration > measureStartBeat + 0.02
+    );
+    // 小節内に明示的な分割休符（例: r4 r16 等）が指定されている場合はそれに従って描画
+    if (
+      measureExplicitRests.length > 1 ||
+      (measureExplicitRests.length === 1 && measureExplicitRests[0].duration < beatsPerMeasure - 0.05)
+    ) {
+      appendRestsForRange(0, beatsPerMeasure);
+      return { notes: vexNotes, items, tuplets: [] };
+    }
+
     const { duration: rDur, isDotted: rDot } = durationToVexDuration(beatsPerMeasure);
     const restNote = new StaveNote({
       clef,
@@ -297,37 +482,11 @@ export function createVexNotesForMeasure(
   const sortedTimes = Array.from(notesByTime.keys()).sort((a, b) => a - b);
 
   for (const t of sortedTimes) {
-    // 直前に空白があれば休符を挿入
+    // 直前に空白があれば休符（単一または複数）を挿入
     const gap = t - currentBeatInMeasure;
-    if (gap > 0.08) {
-      const { duration: rDur, isDotted: rDot } = durationToVexDuration(gap);
-      const restNote = new StaveNote({
-        clef,
-        keys: [clef === 'bass' ? 'd/3' : 'b/4'],
-        duration: `${rDur.replace('d', '')}r`,
-      });
-      if (rDot) {
-        Dot.buildAndAttach([restNote], { all: true });
-      }
-
-      // 休符のタイミングにペダルOFFがあれば ✱ を付与
-      if (pedalEvents && pedalEvents.length > 0) {
-        const hasPedalOff = pedalEvents.some(
-          (p) => p.type === 'off' && Math.abs(p.time - (measureStartBeat + currentBeatInMeasure)) < 0.05
-        );
-        if (hasPedalOff) {
-          try {
-            const relAnn = new Annotation('✱').setVerticalJustification(Annotation.VerticalJustify.BOTTOM);
-            restNote.addModifier(relAnn, 0);
-          } catch {
-            // ignore
-          }
-        }
-      }
-
-      vexNotes.push(restNote);
-      items.push({ staveNote: restNote, noteEvents: [], isRest: true });
-      currentBeatInMeasure += gap;
+    if (gap > 0.04) {
+      appendRestsForRange(currentBeatInMeasure, t);
+      currentBeatInMeasure = t;
     }
 
     const noteGroup = notesByTime.get(t)!;
@@ -432,39 +591,27 @@ export function createVexNotesForMeasure(
 
   // 小節末尾の残り時間を休符で埋める
   const remaining = beatsPerMeasure - currentBeatInMeasure;
-  if (remaining > 0.08) {
-    const { duration: rDur, isDotted: rDot } = durationToVexDuration(remaining);
-    const restNote = new StaveNote({
-      clef,
-      keys: [clef === 'bass' ? 'd/3' : 'b/4'],
-      duration: `${rDur.replace('d', '')}r`,
-    });
-    if (rDot) {
-      Dot.buildAndAttach([restNote], { all: true });
-    }
-    vexNotes.push(restNote);
-    items.push({ staveNote: restNote, noteEvents: [], isRest: true });
+  if (remaining > 0.04) {
+    appendRestsForRange(currentBeatInMeasure, beatsPerMeasure);
   }
 
   // 3連符・連符 (Tuplet) の検出と生成
   const tuplets: Tuplet[] = [];
 
-  // 1. tupletGroupId を持つ明示的連符のグループ化
+  // 1. tupletGroupId を持つ明示的連符のグループ化（連符内の休符も含む）
   const explicitTupletGroups = new Map<number, StaveNote[]>();
   const explicitTupletConfig = new Map<number, { numNotes: number; notesOccupied: number }>();
   items.forEach((it) => {
-    if (!it.isRest && it.noteEvents.length > 0) {
-      const firstEv = it.noteEvents[0];
-      if (firstEv.tupletGroupId !== undefined) {
-        if (!explicitTupletGroups.has(firstEv.tupletGroupId)) {
-          explicitTupletGroups.set(firstEv.tupletGroupId, []);
-          explicitTupletConfig.set(firstEv.tupletGroupId, {
-            numNotes: firstEv.tupletNumber || 3,
-            notesOccupied: firstEv.tupletOccupied || 2,
-          });
-        }
-        explicitTupletGroups.get(firstEv.tupletGroupId)!.push(it.staveNote);
+    const tupletEv = !it.isRest && it.noteEvents.length > 0 ? it.noteEvents[0] : it.restEvent;
+    if (tupletEv && tupletEv.tupletGroupId !== undefined) {
+      if (!explicitTupletGroups.has(tupletEv.tupletGroupId)) {
+        explicitTupletGroups.set(tupletEv.tupletGroupId, []);
+        explicitTupletConfig.set(tupletEv.tupletGroupId, {
+          numNotes: tupletEv.tupletNumber || 3,
+          notesOccupied: tupletEv.tupletOccupied || 2,
+        });
       }
+      explicitTupletGroups.get(tupletEv.tupletGroupId)!.push(it.staveNote);
     }
   });
 
@@ -973,7 +1120,8 @@ export function renderScoreToSvg(
         mGroup.measureIndex,
         beatsPerMeasure,
         defaultClef,
-        track.pedalEvents
+        track.pedalEvents,
+        track.rests
       );
 
       if (vexNotes.length > 0) {
@@ -1294,7 +1442,7 @@ export function renderFullScoreToSvg(
 
         // 音符生成
         const notes = trackMeasureMaps[tIdx].get(mIdx) || [];
-        const { notes: vexNotes, items: measureItems, tuplets: measureTuplets } = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents);
+        const { notes: vexNotes, items: measureItems, tuplets: measureTuplets } = createVexNotesForMeasure(notes, mIdx, beatsPerMeasure, clef, track.pedalEvents, track.rests);
 
         if (vexNotes.length > 0) {
           try {

@@ -45,6 +45,12 @@ export interface RestEvent {
   startTime: number;
   duration: number;
   trackId: number;
+  isTuplet?: boolean;       // 連符（3連符など）の構成休符か
+  tupletGroupId?: number;   // 所属する連符グループID
+  tupletNumber?: number;    // 連符の音数 (例: 3)
+  tupletOccupied?: number;  // 本来の音数 (例: 2)
+  line?: number;            // ソース行番号
+  column?: number;          // ソース列番号
 }
 
 export interface TempoEvent {
@@ -86,6 +92,7 @@ export interface Track {
   channel: number;
   instrument: number;  // General MIDI Program (0: Acoustic Grand Piano, etc.)
   notes: NoteEvent[];
+  rests?: RestEvent[];
   tempoEvents?: TempoEvent[];
   timeSignatureEvents?: TimeSignatureEvent[];
   keySignatureEvents?: KeySignatureEvent[];

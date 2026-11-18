@@ -1,4 +1,4 @@
-import { NoteEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
+import { NoteEvent, RestEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
 import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 import { parseKeySignature, KeySignatureInfo, getDefaultKeySignature } from '../../utils/keySignature';
 
@@ -19,6 +19,7 @@ interface TrackState {
   rehearsalMarks: RehearsalMarkEvent[];   // 構成記号・リハーサルマーク
   currentTime: number; // 4分音符基準の累積時間
   notes: NoteEvent[];
+  rests: RestEvent[];
   tempoEvents: TempoEvent[];
   timeSignatureEvents: TimeSignatureEvent[];
   isPedalOn: boolean;
@@ -79,6 +80,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         rehearsalMarks: [],
         currentTime: 0,
         notes: [],
+        rests: [],
         tempoEvents: [],
         timeSignatureEvents: [],
         isPedalOn: false,
@@ -1002,6 +1004,17 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             if (item.type === 'rest') {
               currentTrack.pendingTieOrSlur = false;
               currentTrack.lastNoteGroup = null;
+              currentTrack.rests.push({
+                startTime: itemStartBeat,
+                duration: stepDuration,
+                trackId: currentTrack.id,
+                isTuplet: true,
+                tupletGroupId: tupletId,
+                tupletNumber: numNotes,
+                tupletOccupied: notesOccupied,
+                line: lineNumber,
+                column: itemCol,
+              });
               timelineItems.push({
                 line: lineNumber,
                 startColumn: itemCol,
@@ -1176,10 +1189,20 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             lenCharsUsed += trailingStrumMatch[0].length;
           }
 
-          const chordDuration = parseDurationLength(chordLenStr, currentTrack.defaultLength);
+          const hasTrailingTie = /[\^&]$/.test(chordLenStr);
+          const cleanChordLenStr = chordLenStr.replace(/[\^&]+$/, '');
+          const chordLenParts = cleanChordLenStr === '' ? [''] : cleanChordLenStr.split(/[\^&]+/);
+          const chordStartBeat = currentTrack.currentTime;
 
-          // 和音内の各音符を解析
-          const chordNotes: NoteEvent[] = [];
+          // 和音内の各音符の音高を解析
+          const parsedChordPitches: {
+            finalPitch: string;
+            transposedMidi: number;
+            fullPitch: string;
+            totalShift: number;
+            isKeyAltered: boolean;
+            accidentalType?: '#' | 'b' | 'n';
+          }[] = [];
           let chordOctave = currentTrack.octave;
           let cIdx = 0;
           while (cIdx < chordContent.length) {
@@ -1203,8 +1226,22 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             const noteMatch = chordContent.slice(cIdx).match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)/);
             if (noteMatch) {
               const resolved = resolvePitchWithKey(noteMatch[1], noteMatch[2] || '', chordOctave, currentTrack);
-              const chordTripInfo = getTripletInfo(chordDuration);
-              chordNotes.push({
+              parsedChordPitches.push(resolved);
+              cIdx += noteMatch[0].length;
+              continue;
+            }
+
+            cIdx++;
+          }
+
+          if (parsedChordPitches.length > 0) {
+            chordLenParts.forEach((partStr, partIdx) => {
+              const partDuration = parseDurationLength(partStr, currentTrack.defaultLength);
+              const chordTripInfo = getTripletInfo(partDuration);
+              const isLastPart = partIdx === chordLenParts.length - 1;
+              const partTrailingTie = isLastPart ? hasTrailingTie : true;
+
+              const chordNotes: NoteEvent[] = parsedChordPitches.map((resolved) => ({
                 pitch: resolved.finalPitch,
                 midiNote: resolved.transposedMidi,
                 originalPitch: resolved.fullPitch,
@@ -1212,10 +1249,10 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 isKeyAltered: resolved.isKeyAltered,
                 accidentalType: resolved.accidentalType,
                 startTime: currentTrack.currentTime,
-                duration: chordDuration,
+                duration: partDuration,
                 velocity: currentTrack.velocity,
                 gateRate: currentTrack.gateRate,
-                gateDuration: chordDuration * currentTrack.gateRate,
+                gateDuration: partDuration * currentTrack.gateRate,
                 trackId: currentTrack.id,
                 channel: currentTrack.channel,
                 instrument: currentTrack.instrument,
@@ -1225,34 +1262,29 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletOccupied: chordTripInfo ? 2 : undefined,
                 line: lineNumber,
                 column: col + 1,
-              });
+              }));
 
-              cIdx += noteMatch[0].length;
-              continue;
-            }
+              // バラシ設定は最初の音長パートの構成音に付与
+              if (isStrum && partIdx === 0) {
+                const sorted = [...chordNotes].sort((a, b) =>
+                  strumDirection === 'down' ? a.midiNote - b.midiNote : b.midiNote - a.midiNote
+                );
 
-            cIdx++;
-          }
+                sorted.forEach((note, idx) => {
+                  note.isStrum = true;
+                  note.strumDirection = strumDirection;
+                  note.strumDelaySec = strumDelaySec;
+                  note.strumOrder = idx;
+                  note.strumTotal = sorted.length;
+                });
+              }
 
-          // バラシ設定を構成音に付与
-          if (chordNotes.length > 0) {
-            if (isStrum) {
-              // ピッチ順（低音→高音 / 高音→低音）で発音インデックスを設定
-              const sorted = [...chordNotes].sort((a, b) =>
-                strumDirection === 'down' ? a.midiNote - b.midiNote : b.midiNote - a.midiNote
-              );
-
-              sorted.forEach((note, idx) => {
-                note.isStrum = true;
-                note.strumDirection = strumDirection;
-                note.strumDelaySec = strumDelaySec;
-                note.strumOrder = idx;
-                note.strumTotal = sorted.length;
-              });
-            }
-
-            const hasTrailingTie = /[\^&]$/.test(chordLenStr);
-            registerNotesToTrack(currentTrack, chordNotes, hasTrailingTie);
+              registerNotesToTrack(currentTrack, chordNotes, partTrailingTie);
+              currentTrack.currentTime += partDuration;
+            });
+          } else {
+            const chordDuration = parseDurationLength(chordLenStr, currentTrack.defaultLength);
+            currentTrack.currentTime += chordDuration;
           }
 
           const chordTokenLen = 1 + chordCloseIdx + afterStrumLen + lenCharsUsed;
@@ -1261,11 +1293,10 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             startColumn: col + 1,
             endColumn: col + chordTokenLen,
             trackId: currentTrack.id,
-            beat: currentTrack.currentTime,
+            beat: chordStartBeat,
             type: 'note',
           });
 
-          currentTrack.currentTime += chordDuration;
           col += chordTokenLen;
           continue;
         } else {
@@ -1279,22 +1310,36 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         }
       }
 
-      // 11. 休符: r, r4, r8., r4^4
+      // 11. 休符: r, r4, r8., r4^4, r4^16
       const restMatch = remaining.match(/^r((?:[\^&]?\d*\.*)*)/i);
       if (restMatch) {
         currentTrack.pendingTieOrSlur = false;
         currentTrack.lastNoteGroup = null;
         const restLenStr = restMatch[1];
-        const duration = parseDurationLength(restLenStr, currentTrack.defaultLength);
+        const cleanRestLenStr = restLenStr.replace(/[\^&]+$/, '');
+        const restLenParts = cleanRestLenStr === '' ? [''] : cleanRestLenStr.split(/[\^&]+/);
+        const restStartBeat = currentTrack.currentTime;
+
+        for (const partStr of restLenParts) {
+          const partDur = parseDurationLength(partStr, currentTrack.defaultLength);
+          currentTrack.rests.push({
+            startTime: currentTrack.currentTime,
+            duration: partDur,
+            trackId: currentTrack.id,
+            line: lineNumber,
+            column: col + 1,
+          });
+          currentTrack.currentTime += partDur;
+        }
+
         timelineItems.push({
           line: lineNumber,
           startColumn: col + 1,
           endColumn: col + restMatch[0].length,
           trackId: currentTrack.id,
-          beat: currentTrack.currentTime,
+          beat: restStartBeat,
           type: 'rest',
         });
-        currentTrack.currentTime += duration;
         col += restMatch[0].length;
         continue;
       }
@@ -1305,45 +1350,54 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         const noteLetter = singleNoteMatch[1];
         const rawAcc = singleNoteMatch[2] || '';
         const noteLenStr = singleNoteMatch[3];
-        const duration = parseDurationLength(noteLenStr, currentTrack.defaultLength);
-        const tripInfo = getTripletInfo(duration);
         const resolved = resolvePitchWithKey(noteLetter, rawAcc, currentTrack.octave, currentTrack);
 
-        const singleNote: NoteEvent = {
-          pitch: resolved.finalPitch,
-          midiNote: resolved.transposedMidi,
-          originalPitch: resolved.fullPitch,
-          keyShift: resolved.totalShift,
-          isKeyAltered: resolved.isKeyAltered,
-          accidentalType: resolved.accidentalType,
-          startTime: currentTrack.currentTime,
-          duration: duration,
-          velocity: currentTrack.velocity,
-          gateRate: currentTrack.gateRate,
-          gateDuration: duration * currentTrack.gateRate,
-          trackId: currentTrack.id,
-          channel: currentTrack.channel,
-          instrument: currentTrack.instrument,
-          isTuplet: tripInfo ? true : undefined,
-          tupletNumber: tripInfo ? 3 : undefined,
-          tupletOccupied: tripInfo ? 2 : undefined,
-          line: lineNumber,
-          column: col + 1,
-        };
-
         const hasTrailingTie = /[\^&]$/.test(noteLenStr);
-        registerNotesToTrack(currentTrack, [singleNote], hasTrailingTie);
+        const cleanNoteLenStr = noteLenStr.replace(/[\^&]+$/, '');
+        const noteLenParts = cleanNoteLenStr === '' ? [''] : cleanNoteLenStr.split(/[\^&]+/);
+        const noteStartBeat = currentTrack.currentTime;
+
+        noteLenParts.forEach((partStr, partIdx) => {
+          const partDuration = parseDurationLength(partStr, currentTrack.defaultLength);
+          const tripInfo = getTripletInfo(partDuration);
+          const isLastPart = partIdx === noteLenParts.length - 1;
+          const partTrailingTie = isLastPart ? hasTrailingTie : true;
+
+          const singleNote: NoteEvent = {
+            pitch: resolved.finalPitch,
+            midiNote: resolved.transposedMidi,
+            originalPitch: resolved.fullPitch,
+            keyShift: resolved.totalShift,
+            isKeyAltered: resolved.isKeyAltered,
+            accidentalType: resolved.accidentalType,
+            startTime: currentTrack.currentTime,
+            duration: partDuration,
+            velocity: currentTrack.velocity,
+            gateRate: currentTrack.gateRate,
+            gateDuration: partDuration * currentTrack.gateRate,
+            trackId: currentTrack.id,
+            channel: currentTrack.channel,
+            instrument: currentTrack.instrument,
+            isTuplet: tripInfo ? true : undefined,
+            tupletNumber: tripInfo ? 3 : undefined,
+            tupletOccupied: tripInfo ? 2 : undefined,
+            line: lineNumber,
+            column: col + 1,
+          };
+
+          registerNotesToTrack(currentTrack, [singleNote], partTrailingTie);
+          currentTrack.currentTime += partDuration;
+        });
 
         timelineItems.push({
           line: lineNumber,
           startColumn: col + 1,
           endColumn: col + singleNoteMatch[0].length,
           trackId: currentTrack.id,
-          beat: currentTrack.currentTime,
+          beat: noteStartBeat,
           type: 'note',
         });
 
-        currentTrack.currentTime += duration;
         col += singleNoteMatch[0].length;
         continue;
       }
@@ -1386,6 +1440,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     const sortedTempo = ts.tempoEvents.sort((a, b) => a.time - b.time);
     const sortedTimeSig = ts.timeSignatureEvents.sort((a, b) => a.time - b.time);
     const sortedNotes = ts.notes.sort((a, b) => a.startTime - b.startTime);
+    const sortedRests = ts.rests.sort((a, b) => a.startTime - b.startTime);
     // トラックの代表音色は「最初に発音される音符の音色」とする
     // (曲の途中で楽器を変更・復帰した場合でも、最後に指定された音色で上書きされないようにする)
     const initialInstrument = sortedNotes.length > 0 && sortedNotes[0].instrument !== undefined
@@ -1397,6 +1452,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       channel: ts.channel,
       instrument: initialInstrument,
       notes: sortedNotes,
+      rests: sortedRests,
       tempoEvents: sortedTempo,
       timeSignatureEvents: sortedTimeSig,
       keySignatureEvents: ts.keySignatureEvents.sort((a, b) => a.time - b.time),
