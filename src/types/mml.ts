@@ -32,6 +32,7 @@ export interface NoteEvent {
   tupletOccupied?: number;  // 本来の音数 (例: 2)
   isKeyAltered?: boolean;   // 調号（Key Signature）によって自動的に変化した音か
   accidentalType?: '#' | 'b' | 'n'; // 楽譜に描画すべき明示的臨時記号（ナチュラル等）
+  lyric?: string;           // 音符に割り当てられた歌詞 (例: "き", "ら", "しゃ", "ー")
 }
 
 export interface PedalEvent {

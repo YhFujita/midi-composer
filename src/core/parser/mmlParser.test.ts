@@ -857,6 +857,50 @@ describe('MML Parser', () => {
       expect(findBeatAtCursor(score.timelineItems, 3, 1)).toBe(8.0);
     });
   });
+
+  describe('歌詞割り当て・ボーカル機能 (Lyrics & Inline Lyric)', () => {
+    it('音符ごとの歌詞指定 c4"き" c4"ら" および c"ひ"4 が正しくパースされること', () => {
+      const code = 'c4"き" d4"ら" e"ひ"4 f4 "か"';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+      expect(notes[0].lyric).toBe('き');
+      expect(notes[1].lyric).toBe('ら');
+      expect(notes[2].lyric).toBe('ひ');
+      expect(notes[3].lyric).toBe('か');
+    });
+
+    it('Lyrics("...") によるフレーズ一括指定と拗音（しゃ・きょ等）の1モーラ分割が正しく割り当てられること', () => {
+      const code = 'Vocal Lyrics("しゃぼんだま") c4 d4 e4 f4 g4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      expect(score.tracks[0].instrument).toBe(129);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(5);
+      expect(notes[0].lyric).toBe('しゃ');
+      expect(notes[1].lyric).toBe('ぼ');
+      expect(notes[2].lyric).toBe('ん');
+      expect(notes[3].lyric).toBe('だ');
+      expect(notes[4].lyric).toBe('ま');
+    });
+
+    it('タイで結合された音符 (c4 & c4) では後続音が歌詞キューを消費しないこと', () => {
+      const code = 'Lyrics("きーら") c4 & c4 d4 e4';
+      const score = parseMML(code);
+
+      expect(score.errors).toHaveLength(0);
+      const notes = score.tracks[0].notes;
+      expect(notes).toHaveLength(4);
+      expect(notes[0].lyric).toBe('き');
+      expect(notes[1].hasTieFromPrev).toBe(true);
+      expect(notes[1].lyric).toBeUndefined();
+      expect(notes[2].lyric).toBe('ー');
+      expect(notes[3].lyric).toBe('ら');
+    });
+  });
 });
 
 

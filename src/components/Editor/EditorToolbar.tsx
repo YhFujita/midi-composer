@@ -77,7 +77,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           title="楽器選択パレットを開く (全128音色 + ドラムセット)"
         >
           <span className="font-mono text-blue-700 font-bold bg-blue-50 px-1 py-0 rounded text-[11px] border border-blue-200">
-            {selectedProgram === 128 ? 'Drum' : `#${selectedProgram}`}
+            {selectedProgram === 128 ? 'Drum' : selectedProgram === 129 ? '🎤Vocal' : `#${selectedProgram}`}
           </span>
           <span className="font-bold text-slate-900 max-w-[110px] sm:max-w-[160px] truncate text-[11px]">
             {currentInst.nameJa}
@@ -110,7 +110,11 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </option>
             {POPULAR_INSTRUMENTS.map((inst) => (
               <option key={inst.program} value={inst.program} style={{ backgroundColor: '#ffffff', color: '#000000' }}>
-                {inst.program === 128 ? '🥁 ドラムセット (Ch 10)' : `${inst.program}: ${inst.nameJa}`}
+                {inst.program === 128
+                  ? '🥁 ドラムセット (Ch 10)'
+                  : inst.program === 129
+                  ? '🎤 ボーカル・歌声合成 (ボカロ)'
+                  : `${inst.program}: ${inst.nameJa}`}
               </option>
             ))}
           </select>
@@ -380,6 +384,42 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <optgroup label="コマンド記法">
                 <option value='Mark("A") '>Mark("A")</option>
                 <option value='Section("Chorus") '>Section("Chorus")</option>
+              </optgroup>
+            </select>
+          </div>
+        )}
+
+        {/* 歌詞・ボカロ歌唱 (Lyrics) クイック挿入ドロップダウン: 白背景・不透明・黒文字 */}
+        {onInsertText && (
+          <div className="flex items-center space-x-1 pl-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onInsertText(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-white border border-pink-300 text-slate-900 font-bold text-[11px] rounded-md px-2 py-1 outline-none hover:border-pink-400 focus:border-pink-600 shadow-sm"
+              style={{ backgroundColor: '#ffffff', color: '#000000', opacity: 1 }}
+              title="エディタのカーソル位置に歌詞（ボカロ歌唱）構文を挿入します"
+            >
+              <option value="" disabled style={{ backgroundColor: '#ffffff', color: '#000000' }}>
+                🎤 歌詞/ボーカルを挿入...
+              </option>
+              <optgroup label="フレーズ一括割り当て (Lyrics)">
+                <option value='Lyrics("きらきらひかる")'>Lyrics("きらきらひかる") /* 以降の音符へ1文字ずつ自動割当 */</option>
+                <option value='Lyrics("おそらのほしよ")'>Lyrics("おそらのほしよ")</option>
+                <option value='Lyrics("ど れ み ふぁ そ ら し ど")'>Lyrics("ど れ み ふぁ そ ら し ど")</option>
+              </optgroup>
+              <optgroup label="音符ごとに個別指定">
+                <option value='c4"ど" d4"れ" e4"み" f4"ふぁ" g2"そ"'>c4"ど" d4"れ" e4"み" f4"ふぁ" g2"そ"</option>
+                <option value='c4"ら"'>c4"ら" /* 単音＋歌詞 */</option>
+                <option value='d4"ー"'>d4"ー" /* 長音 (前の母音を伸ばす) */</option>
+              </optgroup>
+              <optgroup label="ボーカル音色指定">
+                <option value='Voice(129) /* ボーカル・歌声合成 */'>Voice(129) /* ボーカル・歌声合成 */</option>
+                <option value='Vocal /* ボーカルトラック化 */'>Vocal /* ボーカルトラック化 */</option>
               </optgroup>
             </select>
           </div>

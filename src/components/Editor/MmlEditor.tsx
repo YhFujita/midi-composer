@@ -76,7 +76,8 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
           'TR', 'TRACK', 'CH', 'CHANNEL', 'VOICE', 'PROGRAM',
           'TEMPO', 'TIME', 'TIMESIGNATURE', 'OCTAVE', 'LENGTH', 'VOLUME',
           'KEY', 'TRANSPOSE', 'MASTERKEY', 'MASTERTRANSPOSE',
-          'PEDAL', 'PEDALOFF', 'MARK', 'SECTION', 'REHEARSAL'
+          'PEDAL', 'PEDALOFF', 'MARK', 'SECTION', 'REHEARSAL',
+          'LYRICS', 'LYRIC', 'LYRICSADD', 'VOCAL', 'VOCALOID', 'SINGER'
         ],
 
         tokenizer: {
@@ -91,16 +92,20 @@ export const MmlEditor: React.FC<MmlEditorProps> = ({
             [/(?:\uD83C[\uDD30-\uDD49\uDD70-\uDD8E]|[\u24B6-\u24E9\u2460-\u2473])/, 'annotation'],
             [/\[(?:Intro|Verse|Chorus|Bridge|Outro|Interlude|Ending|Coda|Fine|PreChorus|Pre-Chorus|Hook|Theme|Solo|サビ|イントロ|間奏|エンディング|Aメロ|Bメロ|Cメロ|[A-Z](?:['’]|\d+)?|\d+)\]/i, 'annotation'],
 
-            // ペダルコマンド (Pedal, PedalOff, P1, P0, _P, _p)
-            [/(?:PedalOff|Pedal|P1|P0|_P|_p)\b/i, 'keyword'],
+            // ペダル・ボーカルコマンド (Pedal, PedalOff, P1, P0, _P, _p, Vocal)
+            [/(?:PedalOff|Pedal|P1|P0|_P|_p|Vocal(?:oid|On)?)\b/i, 'keyword'],
 
-            // コマンドキーワード (TR, Voice, Tempo 等)
+            // コマンドキーワード (TR, Voice, Tempo, Lyrics 等)
             [/[a-zA-Z]+\b(?=\s*[\(=])/, {
               cases: {
                 '@keywords': 'keyword',
                 '@default': 'identifier'
               }
             }],
+
+            // 歌詞文字列リテラル ("き", "きらきら" 等)
+            [/"[^"]*"/, 'annotation'],
+            [/「[^」]*」/, 'annotation'],
 
             // オクターブ・音長・音量などの短縮コマンド (o4, l8, v100, t120, >, <)
             [/[olvtOLVT]\d+/, 'type'],

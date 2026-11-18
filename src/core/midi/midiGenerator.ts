@@ -115,8 +115,9 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       bytes: [0xff, 0x03, trackNameBytes.length, ...trackNameBytes],
     });
 
-    // プログラムチェンジ (音色選択): 先頭の音色
-    let currentProgram = track.instrument & 0x7f;
+    // プログラムチェンジ (音色選択): 先頭の音色 (129: Vocal Synth は GM 52: Choir Aahs にマッピング)
+    const resolveGmProgram = (prog: number) => (prog === 129 ? 52 : prog & 0x7f);
+    let currentProgram = resolveGmProgram(track.instrument);
     trackEvents.push({
       tick: 0,
       bytes: [0xc0 | channel, currentProgram],
@@ -128,7 +129,8 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       if (note.hasTieFromPrev) return;
 
       // 曲の途中で音色が変わった場合はプログラムチェンジを挿入
-      const noteProgram = (note.instrument !== undefined ? note.instrument : track.instrument) & 0x7f;
+      const rawNoteProg = note.instrument !== undefined ? note.instrument : track.instrument;
+      const noteProgram = resolveGmProgram(rawNoteProg);
       if (noteProgram !== currentProgram) {
         trackEvents.push({
           tick: Math.round(note.startTime * PPQ),
@@ -164,6 +166,22 @@ export function generateMidiBlob(score: ParsedScore): Blob {
       const velocity = Math.max(1, Math.min(127, note.velocity));
 
       const noteChannel = (note.channel !== undefined ? note.channel - 1 : channel) & 0x0f;
+
+      // 歌詞メタイベント (SMF Meta Event 0xFF 0x05: Lyric) の出力 (VOCALOID / VOICEVOX / Synthesizer V 互換)
+      if (note.lyric && note.lyric.trim().length > 0) {
+        try {
+          const encoder = new TextEncoder();
+          const lyricUtf8 = Array.from(encoder.encode(note.lyric.trim()));
+          if (lyricUtf8.length > 0) {
+            trackEvents.push({
+              tick: startTick,
+              bytes: [0xff, 0x05, ...encodeVLQ(lyricUtf8.length), ...lyricUtf8],
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       // Note On
       trackEvents.push({

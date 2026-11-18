@@ -209,9 +209,21 @@ export const DRUM_KIT_INSTRUMENT: InstrumentInfo = {
   isFeatured: true,
 };
 
+export const VOCAL_SYNTH_INSTRUMENT: InstrumentInfo = {
+  program: 129,
+  name: 'Vocal Synth (Singing Voice)',
+  nameJa: 'ボーカル・歌声合成 (ボカロ風)',
+  abbr: 'Vo.',
+  abbrJa: '歌',
+  category: 'Ensemble',
+  categoryJa: 'アンサンブル/合唱',
+  isFeatured: true,
+};
+
 /** プログラム番号から楽器情報を取得 */
 export function getInstrumentByProgram(program: number): InstrumentInfo {
   if (program === 128) return DRUM_KIT_INSTRUMENT;
+  if (program === 129) return VOCAL_SYNTH_INSTRUMENT;
   const found = INSTRUMENTS.find((inst) => inst.program === program);
   return (
     found || {
@@ -228,6 +240,7 @@ export function getInstrumentByProgram(program: number): InstrumentInfo {
 
 /** クイック選択用の代表的な楽器リスト */
 export const POPULAR_INSTRUMENTS: InstrumentInfo[] = [
+  VOCAL_SYNTH_INSTRUMENT,
   ...INSTRUMENTS.filter((inst) => inst.isFeatured),
   DRUM_KIT_INSTRUMENT,
 ];

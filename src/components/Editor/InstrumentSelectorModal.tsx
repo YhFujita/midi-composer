@@ -4,6 +4,7 @@ import {
   INSTRUMENTS,
   INSTRUMENT_CATEGORIES,
   DRUM_KIT_INSTRUMENT,
+  VOCAL_SYNTH_INSTRUMENT,
 } from '../../constants/instruments';
 import { audioEngine } from '../../core/audio/soundFontPlayer';
 
@@ -33,14 +34,17 @@ export const InstrumentSelectorModal: React.FC<InstrumentSelectorModalProps> = (
 
   // カテゴリ & 検索フィルター
   const filteredInstruments = useMemo(() => {
-    let list = [...INSTRUMENTS, DRUM_KIT_INSTRUMENT];
+    let list = [VOCAL_SYNTH_INSTRUMENT, ...INSTRUMENTS, DRUM_KIT_INSTRUMENT];
 
     // カテゴリフィルター
     if (selectedCategory !== 'all') {
       const cat = INSTRUMENT_CATEGORIES.find((c) => c.id === selectedCategory);
       if (cat) {
         list = list.filter(
-          (inst) => (inst.program >= cat.range[0] && inst.program <= cat.range[1]) || (cat.id === 'percussive' && inst.program === 128)
+          (inst) =>
+            (inst.program >= cat.range[0] && inst.program <= cat.range[1]) ||
+            (cat.id === 'percussive' && inst.program === 128) ||
+            (cat.id === 'ensemble' && inst.program === 129)
         );
       }
     }
@@ -99,7 +103,7 @@ export const InstrumentSelectorModal: React.FC<InstrumentSelectorModalProps> = (
     onClose();
   };
 
-  const allInstruments = [...INSTRUMENTS, DRUM_KIT_INSTRUMENT];
+  const allInstruments = [VOCAL_SYNTH_INSTRUMENT, ...INSTRUMENTS, DRUM_KIT_INSTRUMENT];
   const currentInstInfo = allInstruments.find((i) => i.program === currentProgram);
 
   return (

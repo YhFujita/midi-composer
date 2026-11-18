@@ -270,6 +270,33 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
             </div>
           </div>
 
+          {/* 歌詞割り当て・ボカロ歌唱 (Lyrics) */}
+          <div>
+            <h3 className="text-sm font-bold text-pink-700 flex items-center mb-2">
+              <span className="mr-1.5">🎤</span> 9. 歌詞割り当て・ボカロ歌唱 (Lyrics / 音符別歌詞)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-pink-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-pink-300 inline-block">Lyrics(&quot;きらきらひかる&quot;)</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>フレーズ一括割り当て</strong>: 以降の音符に1モーラ（1文字・「しゃ」「きょ」等の拗音はセット）ずつ自動で歌詞を割り当て、五線譜の下に表示してボカロのように歌わせます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                <code className="text-pink-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-pink-300 inline-block">c4&quot;き&quot; c4&quot;ら&quot; g4&quot;き&quot; g4&quot;ら&quot;</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  <strong>音符ごとの個別指定</strong>: 音符の直後に <code>&quot;き&quot;</code> や <code>&quot;ー&quot;</code>（長音：前の母音を引き継ぐ）を記述して1音ずつ歌詞を指定することも可能です。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-pink-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-pink-300 inline-block">Voice(129) / Vocal / ヘッダー「歌声・ボカロ設定」</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🎶 <strong>内蔵フォルマント合成 &amp; VOICEVOX連携</strong>: ブラウザ単体で動作するWeb Audioフォルマント歌声シンセ（女声・ウィスパー・男声・チップボーカル）に加え、PC上で無料の「VOICEVOX」を起動して接続すると本格的なAI歌声合成で歌わせることができます。MIDI出力時にも標準の歌詞メタイベント（SMF Lyric）として書き出されます。
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* 楽器選択パレット・出力機能のご案内 */}
           <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs shadow-sm">
             <h4 className="font-bold text-blue-900 flex items-center gap-1.5 mb-1.5 text-xs">

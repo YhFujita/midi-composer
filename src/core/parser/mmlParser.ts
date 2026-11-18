@@ -1,6 +1,7 @@
 import { NoteEvent, RestEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
 import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 import { parseKeySignature, KeySignatureInfo, getDefaultKeySignature } from '../../utils/keySignature';
+import { tokenizeLyrics } from '../audio/vocalPhonemes';
 
 interface TrackState {
   id: number;
@@ -33,6 +34,8 @@ interface TrackState {
   explicitSlurNotes: NoteEvent[]; // 明示的スラーに属する音符リスト
   currentSlurGroupCount: number; // スラーグループ採番カウンタ
   currentTupletGroupCount: number; // 連符グループ採番カウンタ
+  lyricsQueue: string[]; // Lyrics("...") で登録された歌詞モーラの待機キュー
+  hasConsumedCurrentLyrics: boolean; // 現在の歌詞キューから1文字以上消費したか
 }
 
 export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
@@ -93,6 +96,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         explicitSlurNotes: [],
         currentSlurGroupCount: 0,
         currentTupletGroupCount: 0,
+        lyricsQueue: [],
+        hasConsumedCurrentLyrics: false,
       });
     }
     return tracksMap.get(trackId)!;
@@ -223,6 +228,17 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
       }
       notes.forEach((cn) => (cn.isSlurEnd = true));
       track.explicitSlurNotes.push(...notes);
+    }
+
+    // 3. 歌詞キューからの自動割り当て（タイの後続音ではなく、かつ個別に歌詞が未指定の場合）
+    if (notes.length > 0 && !notes[0].hasTieFromPrev) {
+      if (!notes[0].lyric && track.lyricsQueue.length > 0) {
+        const nextLyric = track.lyricsQueue.shift();
+        if (nextLyric) {
+          notes[0].lyric = nextLyric;
+          track.hasConsumedCurrentLyrics = true;
+        }
+      }
     }
 
     // ペダル処理 & ノート追加
@@ -482,6 +498,39 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
+      // 0.25 歌詞一括指定: Lyrics("きらきらひかる"), Lyric("..."), @lyrics("..."), Lyrics = "..."
+      const lyricsCmdMatch = remaining.match(/^(?:@?(?:Lyrics|Lyric)(Add)?\s*\(\s*(?:"([^"]*)"|'([^']*)'|「([^」]*)」)\s*\)|@?(?:Lyrics|Lyric)(Add)?\s*=\s*(?:"([^"]*)"|'([^']*)'|「([^」]*)」))/i);
+      if (lyricsCmdMatch) {
+        const isAdd = Boolean(lyricsCmdMatch[1] || lyricsCmdMatch[5]);
+        const rawLyricsText = (
+          lyricsCmdMatch[2] ??
+          lyricsCmdMatch[3] ??
+          lyricsCmdMatch[4] ??
+          lyricsCmdMatch[6] ??
+          lyricsCmdMatch[7] ??
+          lyricsCmdMatch[8] ??
+          ''
+        ).trim();
+        const tokens = tokenizeLyrics(rawLyricsText);
+        if (isAdd || !currentTrack.hasConsumedCurrentLyrics) {
+          currentTrack.lyricsQueue.push(...tokens);
+        } else {
+          // 前の Lyrics(...) フレーズからすでに音符へ割り当てが進んでいる場合は、新しいフレーズの先頭としてセット
+          currentTrack.lyricsQueue = [...tokens];
+          currentTrack.hasConsumedCurrentLyrics = false;
+        }
+        col += lyricsCmdMatch[0].length;
+        continue;
+      }
+
+      // 0.26 ボーカル音色指定ショートカット: Vocal, Vocal(1), VocalOn, Singer("...")
+      const vocalCmdMatch = remaining.match(/^(?:Vocal(?:oid|On)?(?:\s*\(\s*[^)]*\s*\))?|Singer\s*\(\s*[^)]*\s*\))\b/i);
+      if (vocalCmdMatch) {
+        currentTrack.instrument = 129; // 129: Vocal Synth (ボーカル・歌声合成)
+        col += vocalCmdMatch[0].length;
+        continue;
+      }
+
       // 0.3 その他文字列設定
       const strAssignMatch = remaining.match(/^[a-zA-Z_]+\s*=\s*"[^"]*"/);
       if (strAssignMatch) {
@@ -587,11 +636,17 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 3. 音色 (Program / Voice): Voice(n), @n, Program(n)
+      // 3. 音色 (Program / Voice): Voice(n), @n, Program(n), Voice("vocal")
+      const voiceVocalMatch = remaining.match(/^(?:(?:VOICE|PROGRAM)\s*\(\s*["']?(?:vocal|vocaloid|sing|voice)["']?\s*\))/i);
+      if (voiceVocalMatch) {
+        currentTrack.instrument = 129;
+        col += voiceVocalMatch[0].length;
+        continue;
+      }
       const voiceMatch = remaining.match(/^(?:(?:VOICE|PROGRAM)\(?=?\s*(\d+)\)?|@\s*(\d+))/i);
       if (voiceMatch) {
         const progNum = parseInt(voiceMatch[1] || voiceMatch[2], 10);
-        currentTrack.instrument = Math.max(0, Math.min(127, progNum));
+        currentTrack.instrument = Math.max(0, Math.min(129, progNum));
         col += voiceMatch[0].length;
         continue;
       }
@@ -841,6 +896,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           keyShift?: number;
           isKeyAltered?: boolean;
           accidentalType?: '#' | 'b' | 'n';
+          lyric?: string;
           chordNotes?: {
             pitch: string;
             midiNote: number;
@@ -972,24 +1028,33 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 ci++;
               }
 
+              const afterCloseChord = tRemaining.slice(closeBracket + 1);
+              const chordLyricMatch = afterCloseChord.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
+              const chordInlineLyric = chordLyricMatch
+                ? (chordLyricMatch[1] ?? chordLyricMatch[2] ?? chordLyricMatch[3] ?? '').trim()
+                : undefined;
+              const chordExtraLen = chordLyricMatch ? chordLyricMatch[0].length : 0;
+
               tupletItems.push({
                 type: 'chord',
                 colOffset: tIdx,
-                rawLength: closeBracket + 1,
+                rawLength: closeBracket + 1 + chordExtraLen,
                 chordNotes: cNotes,
                 isStrum,
                 strumDirection,
                 strumDelaySec,
+                lyric: chordInlineLyric || undefined,
               });
-              tIdx += closeBracket + 1;
+              tIdx += closeBracket + 1 + chordExtraLen;
               continue;
             }
           }
 
-          // 単音符
-          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)/i);
+          // 単音符 (連符内: c"き" 等にも対応)
+          const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)(?:"([^"]*)"|'([^']*)'|「([^」]*)」)?/i);
           if (nMatch) {
             const resolved = resolvePitchWithKey(nMatch[1], nMatch[2] || '', tempOctave, currentTrack);
+            const inlineLyric = (nMatch[3] ?? nMatch[4] ?? nMatch[5] ?? '').trim();
             tupletItems.push({
               type: 'note',
               colOffset: tIdx,
@@ -1000,6 +1065,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               keyShift: resolved.totalShift,
               isKeyAltered: resolved.isKeyAltered,
               accidentalType: resolved.accidentalType,
+              lyric: inlineLyric || undefined,
             });
             tIdx += nMatch[0].length;
             continue;
@@ -1064,6 +1130,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletGroupId: tupletId,
                 tupletNumber: numNotes,
                 tupletOccupied: notesOccupied,
+                lyric: item.lyric,
                 line: lineNumber,
                 column: itemCol,
               };
@@ -1077,7 +1144,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 type: 'note',
               });
             } else if (item.type === 'chord' && item.chordNotes && item.chordNotes.length > 0) {
-              const chordNotes: NoteEvent[] = item.chordNotes.map((cn) => ({
+              const chordNotes: NoteEvent[] = item.chordNotes.map((cn, cnIdx) => ({
                 pitch: cn.pitch,
                 midiNote: cn.midiNote,
                 originalPitch: cn.originalPitch,
@@ -1097,6 +1164,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletGroupId: tupletId,
                 tupletNumber: numNotes,
                 tupletOccupied: notesOccupied,
+                lyric: cnIdx === 0 ? item.lyric : undefined,
                 line: lineNumber,
                 column: itemCol,
               }));
@@ -1210,6 +1278,16 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             lenCharsUsed += trailingStrumMatch[0].length;
           }
 
+          // 5. 和音直後の歌詞指定: [ceg]4"ら"
+          const afterChordLenAndStrum = afterChord.slice(lenCharsUsed);
+          const chordInlineLyricMatch = afterChordLenAndStrum.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
+          let chordInlineLyric: string | undefined = undefined;
+          if (chordInlineLyricMatch) {
+            const rawLyr = (chordInlineLyricMatch[1] ?? chordInlineLyricMatch[2] ?? chordInlineLyricMatch[3] ?? '').trim();
+            if (rawLyr) chordInlineLyric = rawLyr;
+            lenCharsUsed += chordInlineLyricMatch[0].length;
+          }
+
           const hasTrailingTie = /[\^&]$/.test(chordLenStr);
           const cleanChordLenStr = chordLenStr.replace(/[\^&]+$/, '');
           const chordLenParts = cleanChordLenStr === '' ? [''] : cleanChordLenStr.split(/[\^&]+/);
@@ -1262,7 +1340,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               const isLastPart = partIdx === chordLenParts.length - 1;
               const partTrailingTie = isLastPart ? hasTrailingTie : true;
 
-              const chordNotes: NoteEvent[] = parsedChordPitches.map((resolved) => ({
+              const chordNotes: NoteEvent[] = parsedChordPitches.map((resolved, pIdx) => ({
                 pitch: resolved.finalPitch,
                 midiNote: resolved.transposedMidi,
                 originalPitch: resolved.fullPitch,
@@ -1281,6 +1359,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 isTuplet: chordTripInfo ? true : undefined,
                 tupletNumber: chordTripInfo ? 3 : undefined,
                 tupletOccupied: chordTripInfo ? 2 : undefined,
+                lyric: partIdx === 0 && pIdx === 0 ? chordInlineLyric : undefined,
                 line: lineNumber,
                 column: col + 1,
               }));
@@ -1365,12 +1444,15 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, =, n, ♮, ♯, ♭ および長さ)
-      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)((?:[\^&]?\d*\.*)*)/i);
+      // 12. 単音符: c, d, e, f, g, a, b (付加記号: +, #, -, _, =, n, ♮, ♯, ♭、音長、および直後の歌詞 "き", 'き', 「き」)
+      const singleNoteMatch = remaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)(?:"([^"]*)"|'([^']*)'|「([^」]*)」)?((?:[\^&]?\d*\.*)*)(?:"([^"]*)"|'([^']*)'|「([^」]*)」)?/i);
       if (singleNoteMatch) {
         const noteLetter = singleNoteMatch[1];
         const rawAcc = singleNoteMatch[2] || '';
-        const noteLenStr = singleNoteMatch[3];
+        const preLenLyric = (singleNoteMatch[3] ?? singleNoteMatch[4] ?? singleNoteMatch[5] ?? '').trim();
+        const noteLenStr = singleNoteMatch[6] || '';
+        const postLenLyric = (singleNoteMatch[7] ?? singleNoteMatch[8] ?? singleNoteMatch[9] ?? '').trim();
+        const inlineLyric = postLenLyric || preLenLyric || undefined;
         const resolved = resolvePitchWithKey(noteLetter, rawAcc, currentTrack.octave, currentTrack);
 
         const hasTrailingTie = /[\^&]$/.test(noteLenStr);
@@ -1402,6 +1484,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             isTuplet: tripInfo ? true : undefined,
             tupletNumber: tripInfo ? 3 : undefined,
             tupletOccupied: tripInfo ? 2 : undefined,
+            lyric: partIdx === 0 ? inlineLyric : undefined,
             line: lineNumber,
             column: col + 1,
           };
@@ -1420,6 +1503,17 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         });
 
         col += singleNoteMatch[0].length;
+        continue;
+      }
+
+      // 12.5 スペースを挟んで記述された単独の歌詞リテラル (例: c4 "き")
+      const standaloneLyricMatch = remaining.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
+      if (standaloneLyricMatch) {
+        const rawLyr = (standaloneLyricMatch[1] ?? standaloneLyricMatch[2] ?? standaloneLyricMatch[3] ?? '').trim();
+        if (rawLyr && currentTrack.lastNoteGroup && currentTrack.lastNoteGroup.length > 0) {
+          currentTrack.lastNoteGroup[0].lyric = rawLyr;
+        }
+        col += standaloneLyricMatch[0].length;
         continue;
       }
 

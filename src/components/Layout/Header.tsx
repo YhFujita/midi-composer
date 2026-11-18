@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { BookOpen, Music, Columns2, Rows2, Music2, Loader2, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Music, Columns2, Rows2, Music2, Loader2, Mic2 } from 'lucide-react';
 import { soundFontManager, SoundFontState } from '../../core/audio/soundFontManager';
 
 export type LayoutOrientation = 'horizontal' | 'vertical';
@@ -7,6 +7,7 @@ export type LayoutOrientation = 'horizontal' | 'vertical';
 interface HeaderProps {
   onOpenGuide: () => void;
   onOpenSoundFontModal: () => void;
+  onOpenVocalModal?: () => void;
   layoutOrientation: LayoutOrientation;
   onChangeLayout: (layout: LayoutOrientation) => void;
 }
@@ -14,6 +15,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onOpenGuide,
   onOpenSoundFontModal,
+  onOpenVocalModal,
   layoutOrientation,
   onChangeLayout,
 }) => {
@@ -50,6 +52,19 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center space-x-1.5 sm:space-x-2">
+        {/* ボカロ / 歌声合成設定ボタン */}
+        {onOpenVocalModal && (
+          <button
+            type="button"
+            onClick={onOpenVocalModal}
+            className="flex items-center space-x-1.5 px-2.5 py-0.5 text-xs font-bold bg-pink-600 hover:bg-pink-500 active:bg-pink-700 text-white rounded-md transition-all shadow-xs h-7 cursor-pointer"
+            title="ボカロ・歌声合成の声質設定 / VOICEVOX連携"
+          >
+            <Mic2 className="w-3.5 h-3.5" />
+            <span className="text-[11px]">歌声・ボカロ設定</span>
+          </button>
+        )}
+
         {/* SoundFont 音源設定・ステータスインジケーター */}
         <button
           onClick={onOpenSoundFontModal}

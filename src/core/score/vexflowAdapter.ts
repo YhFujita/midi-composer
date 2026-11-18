@@ -45,6 +45,7 @@ export interface ScoreDisplayOptions {
   measureChordOverrides?: Record<number, MeasureChordOverride>; // 小節別のコード表示位置個別指定
   showTiesAndSlurs?: boolean;  // タイ・スラーの記号を描画するか
   showRehearsalMarks?: boolean; // 構成記号・リハーサルマーク (🄰, 🄱 等) を描画するか
+  showLyrics?: boolean;        // 音符下の歌詞 (Lyrics) を描画するか
 }
 
 export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
@@ -61,6 +62,7 @@ export const DEFAULT_DISPLAY_OPTIONS: ScoreDisplayOptions = {
   measureChordOverrides: {},
   showTiesAndSlurs: true,
   showRehearsalMarks: true,
+  showLyrics: true,
 };
 
 /**
@@ -1001,6 +1003,61 @@ export function renderRehearsalMark(
 }
 
 /**
+ * 1小節内の歌詞（Lyrics）を五線下部の揃ったベースラインに美しく描画するヘルパー
+ */
+function renderLyricsForMeasure(
+  ctx: any,
+  items: VexMeasureItem[],
+  staveY: number
+) {
+  const lyricItems = items.filter(
+    (it) => !it.isRest && it.noteEvents && it.noteEvents.some((n) => n.lyric && n.lyric.trim().length > 0)
+  );
+  if (lyricItems.length === 0) return;
+
+  ctx.save();
+  ctx.setFont('sans-serif', 11.5, 'bold');
+
+  // 五線の下部（低音加線やペダル記号と重なりにくい高さ）をベースラインとする
+  const baseLyricY = staveY + 104;
+
+  lyricItems.forEach((item) => {
+    const noteWithLyric = item.noteEvents.find((n) => n.lyric && n.lyric.trim().length > 0);
+    if (!noteWithLyric || !noteWithLyric.lyric) return;
+
+    const lyricText = noteWithLyric.lyric.trim();
+    let noteX = 0;
+    try {
+      noteX = item.staveNote.getAbsoluteX();
+    } catch {
+      return;
+    }
+
+    // 音符たまの中央付近（約 +5px）を基準にテキストをセンタリング
+    let textWidth = lyricText.length * 11;
+    if (typeof ctx.measureText === 'function') {
+      try {
+        const m = ctx.measureText(lyricText);
+        if (m && m.width) textWidth = m.width;
+      } catch {
+        // ignore
+      }
+    }
+
+    const drawX = noteX + 5 - textWidth / 2;
+
+    // 非常に低い音（MIDI 57 = A3 以下でト音記号など）がある場合はさらに少し下に避ける
+    const lowestMidi = Math.min(...item.noteEvents.map((n) => n.midiNote));
+    const lyricY = lowestMidi <= 57 ? baseLyricY + 8 : baseLyricY;
+
+    ctx.setFillStyle('#be185d'); // 視認性が高くボーカル歌詞だと分かりやすい落ち着いたローズピンク/濃紅
+    ctx.fillText(lyricText, drawX, lyricY);
+  });
+
+  ctx.restore();
+}
+
+/**
  * 【パート譜】指定した単一トラックの楽譜を描画する（低音加線保護＆改ページ対応）
  */
 export function renderScoreToSvg(
@@ -1275,6 +1332,11 @@ export function renderScoreToSvg(
           if (options.showTiesAndSlurs !== false) {
             renderTiesAndSlursForMeasure(ctx, measureItems);
           }
+
+          // 歌詞（Lyrics）の描画
+          if (options.showLyrics !== false) {
+            renderLyricsForMeasure(ctx, measureItems, y);
+          }
         } catch {
           // ignore
         }
@@ -1383,8 +1445,9 @@ export function renderFullScoreToSvg(
   const leftMargin = partNameMode === 'multilineJa' ? 95 : partNameMode === 'trackOnly' ? 45 : 75;
   const totalRowStavesWidth = containerWidth - leftMargin - 25;
 
-  // 1パートあたりの高さを 125px に設定、上部コード余白を考慮して systemHeight を調整
-  const trackStaveHeight = 125;
+  // 1パートあたりの高さを設定（歌詞が含まれる場合は余裕を持たせる）
+  const hasAnyLyrics = tracks.some((t) => t.notes.some((n) => Boolean(n.lyric)));
+  const trackStaveHeight = hasAnyLyrics && options.showLyrics !== false ? 140 : 125;
   const topPadding = 42;
   const systemHeight = tracks.length * trackStaveHeight + topPadding + 25;
   const rowCount = Math.ceil(totalMeasures / measuresPerRow);
@@ -1652,6 +1715,11 @@ export function renderFullScoreToSvg(
             // タイおよびスラーの描画
             if (options.showTiesAndSlurs !== false) {
               renderTiesAndSlursForMeasure(ctx, measureItems);
+            }
+
+            // 歌詞（Lyrics）の描画
+            if (options.showLyrics !== false) {
+              renderLyricsForMeasure(ctx, measureItems, staveY);
             }
           } catch {
             // ignore

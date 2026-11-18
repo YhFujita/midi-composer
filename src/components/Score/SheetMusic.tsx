@@ -531,6 +531,23 @@ export const SheetMusic: React.FC<SheetMusicProps> = ({
                     />
                   </label>
 
+                  {/* 歌詞 (Lyrics) 表示 */}
+                  <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">
+                    <div className="flex flex-col">
+                      <span className="text-slate-800 font-medium flex items-center">
+                        <span className="mr-1 text-pink-600">🎤</span>
+                        歌詞 (Lyrics) を表示
+                      </span>
+                      <span className="text-[10px] text-slate-500">音符の下に割り当てた歌詞を表示</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={displayOptions.showLyrics !== false}
+                      onChange={(e) => updateDisplayOption('showLyrics', e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                  </label>
+
                   {/* コードネーム表示 */}
                   <div className="border-t border-slate-200 pt-2 mt-1 space-y-2">
                     <label className="flex items-center justify-between p-1.5 rounded hover:bg-slate-100 cursor-pointer select-none">

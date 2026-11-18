@@ -8,30 +8,56 @@ export interface PresetSong {
 export const PRESET_SONGS: PresetSong[] = [
   {
     id: 'twinkle',
-    title: 'きらきら星 (2パート)',
-    description: 'メロディと伴奏のシンプルな2トラック構成',
+    title: '🎤 きらきら星 (ボカロ歌詞付き・2パート)',
+    description: '歌詞付きメロディ（ボカロ歌唱）と伴奏の2トラック構成',
     mml: `// きらきら星 (Twinkle, Twinkle, Little Star)
 // テンポ110 / 4分の4拍子
 Tempo(110)
 TimeSignature(4,4)
 
-// Track 1: メロディパート (Piano)
-TR(1) Voice(0) v105 o5 l4
+// Track 1: ボーカルパート (Lyrics一括指定 & 音符ごと歌詞指定の両方に対応)
+TR(1) Voice(129) /* ボーカル・歌声合成 */ v108 o5 l4
+Lyrics("きらきらひかる")
 c c g g | a a g2 |
+Lyrics("おそらのほしよ")
 f f e e | d d c2 |
+Lyrics("まばたきしては")
 g g f f | e e d2 |
+Lyrics("みんなをみてる")
 g g f f | e e d2 |
-c c g g | a a g2 |
-f f e e | d d c2 |
+// 音符ごとに "歌詞" を直接書く記法でも指定できます
+c"き" c"ら" g"き" g"ら" | a"ひ" a"か" g2"る" |
+f"お" f"そ" e"ら" e"の" | d"ほ" d"し" c2"よ" |
 
 // Track 2: 伴奏パート (Strings / Piano)
-TR(2) Voice(48) v85 o4 l2
+TR(2) Voice(48) v80 o4 l2
 [c e g] [c e g] | [c f a] [c e g] |
 [d f a] [c e g] | [b- d g] [c e g] |
 [c e g] [d f a] | [c e g] [b- d g] |
 [c e g] [d f a] | [c e g] [b- d g] |
 [c e g] [c e g] | [c f a] [c e g] |
 [d f a] [c e g] | [b- d g] [c e g] |
+`
+  },
+  {
+    id: 'haru_no_ogawa',
+    title: '🎤 春の小川 (ボカロ歌唱＆伴奏)',
+    description: '日本語の五母音・子音・拗音を歌うボカロ歌唱サンプル',
+    mml: `// 春の小川 (ボーカル＆ピアノ伴奏)
+Tempo(108)
+TimeSignature(4,4)
+
+// Track 1: ボーカルパート
+TR(1) Voice(129) v110 o4 l8
+Lyrics("はるのおがわは さらさらいくよ")
+g4 > c4 c8 d8 e4 | c8 d8 e8 c8 d4 c4 |
+Lyrics("きしのすみれや れんげのはなに")
+< g4 > c4 c8 d8 e4 | c8 d8 e8 g8 d4 c4 |
+
+// Track 2: アコースティックピアノ伴奏
+TR(2) Voice(0) v82 o4 l4
+[c e g] [c e g] [c f a] [c e g] | [c e g] [a > c e <] [f a > d <] [c e g] |
+[c e g] [c e g] [c f a] [c e g] | [c e g] [a > c e <] [g b > d <] [c e g] |
 `
   },
   {

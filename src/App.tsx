@@ -7,6 +7,7 @@ import { PianoKeyboardPanel } from './components/Keyboard/PianoKeyboardPanel';
 import { MmlGuideModal } from './components/Editor/MmlGuideModal';
 import { SoundFontModal } from './components/SoundFont/SoundFontModal';
 import { MidiImportModal } from './components/MidiImport/MidiImportModal';
+import { VocalSettingsModal } from './components/Vocal/VocalSettingsModal';
 import { parseMML, findBeatAtCursor } from './core/parser/mmlParser';
 import { generateMidiBlob } from './core/midi/midiGenerator';
 import { parseMidiFile, ParsedMidiData } from './core/midi/midiParser';
@@ -69,6 +70,8 @@ export const App: React.FC = () => {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   // SoundFont設定モーダル
   const [isSoundFontModalOpen, setIsSoundFontModalOpen] = useState(false);
+  // 歌声合成(ボカロ)設定モーダル
+  const [isVocalModalOpen, setIsVocalModalOpen] = useState(false);
 
   // 全体移調 (半音単位, 例: -1 で短2度下げ)
   const [globalKeyShift, setGlobalKeyShift] = useState<number>(0);
@@ -473,6 +476,7 @@ export const App: React.FC = () => {
       <Header
         onOpenGuide={() => setIsGuideOpen(true)}
         onOpenSoundFontModal={() => setIsSoundFontModalOpen(true)}
+        onOpenVocalModal={() => setIsVocalModalOpen(true)}
         layoutOrientation={layoutOrientation}
         onChangeLayout={handleLayoutChange}
       />
@@ -612,6 +616,12 @@ export const App: React.FC = () => {
       <SoundFontModal
         isOpen={isSoundFontModalOpen}
         onClose={() => setIsSoundFontModalOpen(false)}
+      />
+
+      {/* 歌声合成 (ボカロ歌唱) 設定モーダル */}
+      <VocalSettingsModal
+        isOpen={isVocalModalOpen}
+        onClose={() => setIsVocalModalOpen(false)}
       />
 
       {/* MIDIインポート設定モーダル */}

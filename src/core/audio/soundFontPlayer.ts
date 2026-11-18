@@ -2,6 +2,12 @@ import { ParsedScore, NoteEvent } from '../../types/mml';
 import { midiToFreq } from '../../utils/noteConverter';
 import { soundFontManager } from './soundFontManager';
 import { WorkletSynthesizer } from 'spessasynth_lib';
+import {
+  scheduleFormantVocalNote,
+  vocalSettingsManager,
+} from './vocalSynth';
+import { VowelType } from './vocalPhonemes';
+import { voicevoxClient, VoicevoxNoteInput } from './voicevoxClient';
 
 export interface PlayerCallback {
   onProgress?: (currentTimeSec: number, currentBeat: number, totalDurationSec: number) => void;
@@ -215,10 +221,24 @@ export class AudioEngine {
   }
 
   /**
+   * 該当ノートを歌声合成（ボカロ）として発音すべきか判定
+   */
+  private isVocalNote(note: NoteEvent, trackInstrument: number): boolean {
+    const inst = note.instrument !== undefined ? note.instrument : trackInstrument;
+    if (inst === 129) return true;
+    const settings = vocalSettingsManager.getSettings();
+    if (settings.singAllLyricNotes !== false && note.lyric && note.lyric.trim().length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * 楽譜の全ノートを発音スケジュール用アイテムに平坦化
    */
   private prepareScheduledNotes(score: ParsedScore, startOffsetSec: number): ScheduledNoteItem[] {
     const list: ScheduledNoteItem[] = [];
+    const vocalSettings = vocalSettingsManager.getSettings();
 
     score.tracks.forEach((track) => {
       // 0-indexed channel (0-15)
@@ -226,6 +246,13 @@ export class AudioEngine {
 
       track.notes.forEach((note, noteIdx) => {
         if (note.hasTieFromPrev) return;
+
+        const isVocal = this.isVocalNote(note, track.instrument);
+        const accLayerGain = vocalSettings.accompanimentLayerGain ?? 0.2;
+        // ボーカルノートで伴奏ユニゾンレイヤーが0の場合はSoundFont側では鳴らさない
+        if (isVocal && accLayerGain <= 0.01) {
+          return;
+        }
 
         let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         let effectiveEndBeat = note.startTime + noteDur;
@@ -262,7 +289,10 @@ export class AudioEngine {
         const effectiveEndSec = Math.max(effectiveStartSec + 0.04, noteEndSec - releaseGap);
 
         if (effectiveEndSec > startOffsetSec) {
-          const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+          const rawInst = note.instrument !== undefined ? note.instrument : track.instrument;
+          const inst = rawInst === 129 ? 52 : rawInst; // 129(Vocal)のユニゾン補助音は 52(Choir Aahs)
+          const rawVel = note.velocity || 100;
+          const effectiveVel = isVocal ? Math.max(1, Math.round(rawVel * accLayerGain)) : rawVel;
           const noteChannel = note.channel !== undefined ? Math.max(0, Math.min(15, note.channel - 1)) : midiChannel;
           list.push({
             id: `tr${track.id}_n${noteIdx}_${note.midiNote}_${effectiveStartSec}`,
@@ -270,7 +300,7 @@ export class AudioEngine {
             endSec: effectiveEndSec,
             channel: noteChannel,
             midiNote: note.midiNote,
-            velocity: note.velocity || 100,
+            velocity: effectiveVel,
             instrument: inst,
           });
         }
@@ -279,6 +309,185 @@ export class AudioEngine {
 
     list.sort((a, b) => a.startSec - b.startSec);
     return list;
+  }
+
+  /**
+   * ボーカルノート群を Web Audio フォルマント合成または VOICEVOX Engine でスケジュールする
+   */
+  private scheduleVocalTracks(score: ParsedScore, startOffsetSec: number) {
+    if (!this.audioCtx) return;
+    const ctx = this.audioCtx;
+    const vocalSettings = vocalSettingsManager.getSettings();
+
+    const vocalMaster = ctx.createGain();
+    vocalMaster.gain.setValueAtTime(0.85, ctx.currentTime);
+    vocalMaster.connect(ctx.destination);
+
+    const shouldTryVoicevox =
+      vocalSettings.engineMode === 'voicevox' ||
+      (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
+
+    score.tracks.forEach((track) => {
+      interface ResolvedVocalItem {
+        note: NoteEvent;
+        startSec: number;
+        endSec: number;
+        lyric: string;
+        isSlurredFromPrev: boolean;
+      }
+
+      const vocalItems: ResolvedVocalItem[] = [];
+      let prevWasSlurred = false;
+
+      track.notes.forEach((note, noteIdx) => {
+        if (note.hasTieFromPrev) return;
+        if (!this.isVocalNote(note, track.instrument)) {
+          prevWasSlurred = false;
+          return;
+        }
+
+        let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        // 歌声の場合はゲートタイムが短すぎないよう最低でも音長の92%を確保して滑らかに歌わせる
+        noteDur = Math.max(noteDur, note.duration * 0.92);
+        let effectiveEndBeat = note.startTime + noteDur;
+
+        if (note.hasTieToNext) {
+          let currentNote = note;
+          for (let nextIdx = noteIdx + 1; nextIdx < track.notes.length; nextIdx++) {
+            const nextNote = track.notes[nextIdx];
+            if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
+              const nextDur = Math.max(
+                nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration,
+                nextNote.duration * 0.92
+              );
+              effectiveEndBeat = nextNote.startTime + nextDur;
+              if (!nextNote.hasTieToNext) break;
+              currentNote = nextNote;
+            }
+          }
+        }
+
+        const startSec = this.beatToSec(note.startTime);
+        const endSec = this.beatToSec(effectiveEndBeat);
+        const lyricText = note.lyric && note.lyric.trim().length > 0 ? note.lyric.trim() : 'ら';
+
+        vocalItems.push({
+          note,
+          startSec,
+          endSec: Math.max(startSec + 0.05, endSec),
+          lyric: lyricText,
+          isSlurredFromPrev: prevWasSlurred,
+        });
+
+        prevWasSlurred = Boolean(note.slurGroupId !== undefined && !note.isSlurEnd);
+      });
+
+      if (vocalItems.length === 0) return;
+
+      // 内蔵フォルマントシンセでスケジュールする関数
+      const scheduleWithFormant = (currentOffsetSec: number) => {
+        if (!this.audioCtx || !this.isPlaying) return;
+        const now = this.audioCtx.currentTime;
+        let prevVowel: VowelType = 'a';
+
+        vocalItems.forEach((item) => {
+          if (item.endSec <= currentOffsetSec) {
+            // すでに過ぎたノートでも母音の引き継ぎ（長音「ー」用）だけ更新
+            const res = scheduleFormantVocalNote(
+              ctx,
+              item.note.midiNote,
+              item.lyric,
+              prevVowel,
+              0,
+              0.01,
+              0,
+              vocalMaster,
+              vocalSettings,
+              item.isSlurredFromPrev
+            );
+            prevVowel = res.vowel;
+            res.stop(0);
+            return;
+          }
+
+          const effectiveStart = Math.max(currentOffsetSec, item.startSec);
+          const audioStartTime = now + (effectiveStart - currentOffsetSec);
+          const durSec = Math.max(0.04, item.endSec - effectiveStart);
+
+          const scheduled = scheduleFormantVocalNote(
+            ctx,
+            item.note.midiNote,
+            item.lyric,
+            prevVowel,
+            audioStartTime,
+            durSec,
+            item.note.velocity || 100,
+            vocalMaster,
+            vocalSettings,
+            item.isSlurredFromPrev
+          );
+          prevVowel = scheduled.vowel;
+          this.activeOscillatorNodes.push(scheduled);
+        });
+      };
+
+      if (shouldTryVoicevox) {
+        const vvInputs: VoicevoxNoteInput[] = vocalItems.map((it) => ({
+          midiNote: it.note.midiNote,
+          startSec: it.startSec,
+          endSec: it.endSec,
+          lyric: it.lyric,
+        }));
+
+        voicevoxClient
+          .synthesizeTrackVocal(ctx, vvInputs)
+          .then((clip) => {
+            if (!this.isPlaying || !this.audioCtx) return;
+            const currentPlaySec = this.getCurrentTimeSec();
+            if (!clip) {
+              scheduleWithFormant(currentPlaySec);
+              return;
+            }
+
+            const src = ctx.createBufferSource();
+            src.buffer = clip.audioBuffer;
+            const vvGain = ctx.createGain();
+            vvGain.gain.setValueAtTime((vocalSettings.vocalVolume ?? 1.25) * 0.95, ctx.currentTime);
+            src.connect(vvGain);
+            vvGain.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+            if (clip.startOffsetSec >= currentPlaySec) {
+              const delay = clip.startOffsetSec - currentPlaySec;
+              src.start(now + delay);
+            } else {
+              const bufferOffset = currentPlaySec - clip.startOffsetSec;
+              if (bufferOffset < clip.audioBuffer.duration) {
+                src.start(now, bufferOffset);
+              }
+            }
+
+            this.activeOscillatorNodes.push({
+              stop: (t: number) => {
+                try {
+                  src.stop(t);
+                  src.disconnect();
+                  vvGain.disconnect();
+                } catch {
+                  // ignore
+                }
+              },
+            });
+          })
+          .catch(() => {
+            if (this.isPlaying) {
+              scheduleWithFormant(this.getCurrentTimeSec());
+            }
+          });
+      } else {
+        scheduleWithFormant(startOffsetSec);
+      }
+    });
   }
 
   /**
@@ -324,20 +533,24 @@ export class AudioEngine {
       score.tracks.forEach((track) => {
         const ch = Math.max(0, Math.min(15, track.channel - 1));
         if (!initialPrograms.has(ch)) {
-          initialPrograms.set(ch, track.instrument);
+          initialPrograms.set(ch, track.instrument === 129 ? 52 : track.instrument);
         }
       });
       initialPrograms.forEach((program, ch) => {
         if (ch !== 9) { // チャンネル 9 (10) はドラム専用
-          this.synth?.programChange(ch, program);
-          this.channelCurrentPrograms[ch] = program;
+          const gmProg = program === 129 ? 52 : Math.max(0, Math.min(127, program));
+          this.synth?.programChange(ch, gmProg);
+          this.channelCurrentPrograms[ch] = gmProg;
         }
       });
 
       this.startSoundFontScheduler();
+      // 歌詞・ボーカルトラックの歌声合成スケジュール
+      this.scheduleVocalTracks(score, startOffsetSec);
     } else {
       // SoundFont ロード前はオシレータフォールバックで再生
       this.playOscillatorFallback(score, startOffsetSec);
+      this.scheduleVocalTracks(score, startOffsetSec);
     }
 
     this.startProgressLoop();
@@ -434,6 +647,8 @@ export class AudioEngine {
     score.tracks.forEach((track) => {
       track.notes.forEach((note, noteIdx) => {
         if (note.hasTieFromPrev) return;
+        // ボーカルノートは scheduleVocalTracks で発音されるため重複回避
+        if (this.isVocalNote(note, track.instrument)) return;
 
         let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
         let effectiveEndBeat = note.startTime + noteDur;
@@ -843,6 +1058,43 @@ export class AudioEngine {
   }
 
   /**
+   * ボーカル歌声のプレビュー試聴 ("ど・れ・み・ふぁ・そ" を歌う)
+   */
+  public previewVocal(sampleLyrics: string[] = ['ど', 'れ', 'み', 'ふぁ', 'そ']) {
+    const ctx = this.initAudioContext();
+    this.previewTimers.forEach((id) => clearTimeout(id));
+    this.previewTimers = [];
+
+    const now = ctx.currentTime;
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.85, now);
+    masterGain.connect(ctx.destination);
+
+    const midis = [60, 62, 64, 65, 67];
+    let prevVowel: VowelType = 'a';
+    const settings = vocalSettingsManager.getSettings();
+
+    midis.forEach((midi, idx) => {
+      const lyric = sampleLyrics[idx] || 'ら';
+      const offset = idx * 0.28;
+      const dur = idx === midis.length - 1 ? 0.55 : 0.26;
+      const res = scheduleFormantVocalNote(
+        ctx,
+        midi,
+        lyric,
+        prevVowel,
+        now + offset,
+        dur,
+        105,
+        masterGain,
+        settings,
+        false
+      );
+      prevVowel = res.vowel;
+    });
+  }
+
+  /**
    * 楽器の音色確認用の短いプレビュー演奏 (C4, E4, G4 の分散和音)
    */
   public previewInstrument(instrument: number) {
@@ -851,6 +1103,12 @@ export class AudioEngine {
     // 以前のプレビュー演奏タイマーをキャンセル
     this.previewTimers.forEach((id) => clearTimeout(id));
     this.previewTimers = [];
+
+    // 129: ボーカル・歌声合成のプレビュー
+    if (instrument === 129) {
+      this.previewVocal(['ど', 'み', 'そ']);
+      return;
+    }
 
     if (this.isSoundFontReady && this.synth) {
       // プレビュー用チャンネル(0)の発音中ボイスを停止してから楽器変更
@@ -989,6 +1247,15 @@ export class AudioEngine {
    */
   public noteOn(midiNote: number, velocity = 100, instrument = 0, isDrum = false) {
     const ctx = this.initAudioContext();
+
+    if (!isDrum && instrument === 129) {
+      const now = ctx.currentTime;
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.8, now);
+      masterGain.connect(ctx.destination);
+      scheduleFormantVocalNote(ctx, midiNote, 'ら', 'a', now, 0.45, velocity, masterGain);
+      return;
+    }
 
     if (this.isSoundFontReady && this.synth) {
       if (isDrum) {
@@ -1179,16 +1446,35 @@ export class AudioEngine {
     }
     const offlineCtx = new OfflineAudioCtxClass(2, length, sampleRate);
 
-    // 現時点ではブラウザ間互換性と安定性のため、Offline時は確実かつ高速なオシレータ合成またはフォールバックパイプラインを使用
+    // 現時点ではブラウザ間互換性と安定性のため、Offline時は確実かつ高速なオシレータ合成＋歌声合成パイプラインを使用
     const masterGain = offlineCtx.createGain();
     masterGain.gain.setValueAtTime(0.7, 0);
     masterGain.connect(offlineCtx.destination);
 
-    score.tracks.forEach((track) => {
+    const vocalSettings = vocalSettingsManager.getSettings();
+    const shouldTryVoicevox =
+      vocalSettings.engineMode === 'voicevox' ||
+      (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
+
+    for (const track of score.tracks) {
+      const vvInputs: VoicevoxNoteInput[] = [];
+      const vocalNotesMeta: {
+        note: NoteEvent;
+        startSec: number;
+        durSec: number;
+        lyric: string;
+        isSlurredFromPrev: boolean;
+      }[] = [];
+      let prevWasSlurred = false;
+
       track.notes.forEach((note, noteIdx) => {
         if (note.hasTieFromPrev) return;
 
+        const isVocal = this.isVocalNote(note, track.instrument);
         let noteDur = note.gateDuration !== undefined ? note.gateDuration : note.duration;
+        if (isVocal) {
+          noteDur = Math.max(noteDur, note.duration * 0.92);
+        }
         let effectiveEndBeat = note.startTime + noteDur;
 
         if (note.hasTieToNext) {
@@ -1197,7 +1483,7 @@ export class AudioEngine {
             const nextNote = track.notes[nextIdx];
             if (nextNote.hasTieFromPrev && nextNote.midiNote === currentNote.midiNote) {
               const nextDur = nextNote.gateDuration !== undefined ? nextNote.gateDuration : nextNote.duration;
-              effectiveEndBeat = nextNote.startTime + nextDur;
+              effectiveEndBeat = nextNote.startTime + (isVocal ? Math.max(nextDur, nextNote.duration * 0.92) : nextDur);
               if (!nextNote.hasTieToNext) break;
               currentNote = nextNote;
             }
@@ -1211,14 +1497,91 @@ export class AudioEngine {
         const noteEndSec = this.beatToSec(effectiveEndBeat);
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
-        const inst = note.instrument !== undefined ? note.instrument : track.instrument;
-        const effectiveNote: NoteEvent = {
-          ...note,
-          channel: note.channel !== undefined ? note.channel : track.channel,
-        };
-        this.scheduleNoteOscillator(offlineCtx, effectiveNote, inst, noteStartSec, noteDurSec, masterGain);
+        if (isVocal) {
+          const lyricText = note.lyric && note.lyric.trim().length > 0 ? note.lyric.trim() : 'ら';
+          vvInputs.push({
+            midiNote: note.midiNote,
+            startSec: noteStartSec,
+            endSec: Math.max(noteStartSec + 0.05, noteEndSec),
+            lyric: lyricText,
+          });
+          vocalNotesMeta.push({
+            note,
+            startSec: noteStartSec,
+            durSec: Math.max(0.04, noteDurSec),
+            lyric: lyricText,
+            isSlurredFromPrev: prevWasSlurred,
+          });
+          prevWasSlurred = Boolean(note.slurGroupId !== undefined && !note.isSlurEnd);
+
+          // ユニゾン補助レイヤーが有効な場合は薄く伴奏音もミックス
+          const accGain = vocalSettings.accompanimentLayerGain ?? 0.2;
+          if (accGain > 0.01) {
+            const inst = (note.instrument !== undefined ? note.instrument : track.instrument) === 129
+              ? 52
+              : (note.instrument !== undefined ? note.instrument : track.instrument);
+            const effectiveNote: NoteEvent = {
+              ...note,
+              velocity: Math.max(1, Math.round((note.velocity || 100) * accGain)),
+              channel: note.channel !== undefined ? note.channel : track.channel,
+            };
+            this.scheduleNoteOscillator(offlineCtx, effectiveNote, inst, noteStartSec, noteDurSec, masterGain);
+          }
+        } else {
+          prevWasSlurred = false;
+          const inst = note.instrument !== undefined ? note.instrument : track.instrument;
+          const effectiveNote: NoteEvent = {
+            ...note,
+            channel: note.channel !== undefined ? note.channel : track.channel,
+          };
+          this.scheduleNoteOscillator(offlineCtx, effectiveNote, inst, noteStartSec, noteDurSec, masterGain);
+        }
       });
-    });
+
+      if (vocalNotesMeta.length > 0) {
+        let renderedWithVoicevox = false;
+        if (shouldTryVoicevox) {
+          try {
+            const clip = await voicevoxClient.synthesizeTrackVocal(offlineCtx, vvInputs);
+            if (clip) {
+              const src = offlineCtx.createBufferSource();
+              src.buffer = clip.audioBuffer;
+              const vvGain = offlineCtx.createGain();
+              vvGain.gain.setValueAtTime((vocalSettings.vocalVolume ?? 1.25) * 0.95, 0);
+              src.connect(vvGain);
+              vvGain.connect(offlineCtx.destination);
+              if (clip.startOffsetSec >= 0) {
+                src.start(clip.startOffsetSec);
+              } else {
+                src.start(0, -clip.startOffsetSec);
+              }
+              renderedWithVoicevox = true;
+            }
+          } catch {
+            renderedWithVoicevox = false;
+          }
+        }
+
+        if (!renderedWithVoicevox) {
+          let prevVowel: VowelType = 'a';
+          vocalNotesMeta.forEach((vm) => {
+            const res = scheduleFormantVocalNote(
+              offlineCtx,
+              vm.note.midiNote,
+              vm.lyric,
+              prevVowel,
+              vm.startSec,
+              vm.durSec,
+              vm.note.velocity || 100,
+              masterGain,
+              vocalSettings,
+              vm.isSlurredFromPrev
+            );
+            prevVowel = res.vowel;
+          });
+        }
+      }
+    }
 
     return await offlineCtx.startRendering();
   }
