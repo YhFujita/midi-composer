@@ -59,36 +59,394 @@ export function hiraganaToKatakana(str: string): string {
   });
 }
 
+export interface LyricToken {
+  /** 楽譜表示・MIDI歌詞出力用の表記 (例: "は", "へ", "き", "しゃ") */
+  display: string;
+  /** ユーザーが は[わ] / は[は] / は［わ］ 等で明示的に指定した発音 */
+  explicitPronunciation?: string;
+  /** 文脈（文節末・定型句・複合助詞等）から自動推定された発音 (例: "わ", "え") */
+  autoPronunciation?: string;
+}
+
 /**
- * フレーズ歌詞文字列 (例: "きらきらひかる", "しゃぼんだま とんだ", "Twinkle little") を
- * 音符1つ分に割り当てるモーラ（拍）配列に分割する
+ * 音符個別指定の歌詞文字列 (例: "は[わ]", "は［わ］", "は[は]", "き") を
+ * 表示文字と明示的発音指定に分離する
  */
-export function tokenizeLyrics(lyricsText: string): string[] {
+export function parseInlineLyric(rawLyric: string): LyricToken {
+  const trimmed = rawLyric.trim();
+  if (!trimmed) {
+    return { display: '' };
+  }
+
+  const match = trimmed.match(/^(.+?)\s*[\[［]([^\]］]+)[\]］]$/);
+  if (match) {
+    const display = match[1].trim();
+    const explicitPronunciation = match[2].trim();
+    if (display && explicitPronunciation) {
+      return { display, explicitPronunciation };
+    }
+  }
+
+  return { display: trimmed };
+}
+
+/**
+ * 音符の発音すべき歌詞文字列を解決する
+ * 優先順位:
+ *  1. ユーザー明示指定 (lyricPronunciation: は[わ] / は[は] 等)
+ *  2. 文脈自動推定 (autoLyricPronunciation: 設定ON時のみ)
+ *  3. 表示歌詞そのまま (lyric)
+ */
+export function resolveNotePronunciation(
+  note: {
+    lyric?: string;
+    lyricPronunciation?: string;
+    autoLyricPronunciation?: string;
+  },
+  autoConvertParticles = true
+): string {
+  if (note.lyricPronunciation && note.lyricPronunciation.trim().length > 0) {
+    return note.lyricPronunciation.trim();
+  }
+  if (
+    autoConvertParticles &&
+    note.autoLyricPronunciation &&
+    note.autoLyricPronunciation.trim().length > 0
+  ) {
+    return note.autoLyricPronunciation.trim();
+  }
+  if (note.lyric && note.lyric.trim().length > 0) {
+    const parsed = parseInlineLyric(note.lyric);
+    return parsed.explicitPronunciation || parsed.display;
+  }
+  return 'ら';
+}
+
+/**
+ * 文節末に「は」があっても助詞ではなく「は (ha)」と発音する例外語
+ */
+const HA_WORD_END_EXCEPTIONS = new Set<string>([
+  'はは',
+  'ちちはは',
+  'あは',
+  'あはは',
+  'うは',
+  'うはは',
+  'わはは',
+  'がはは',
+  'ははは',
+  'ふは',
+  'ふはは',
+  'ぶは',
+  'ぷは',
+  'げは',
+  'きゃは',
+  'きゃはは',
+  'いろは',
+  'このは',
+  'ことのは',
+  'くさは',
+  'もろは',
+  'なは',
+  'やまは',
+  'さは',
+  'しゅうは',
+]);
+
+/**
+ * 文節末に「へ」があっても助詞ではなく「へ (he)」と発音する例外語
+ */
+const HE_WORD_END_EXCEPTIONS = new Set<string>([
+  'えへ',
+  'えへへ',
+  'へへ',
+  'へへへ',
+  'てへ',
+  'うへ',
+  'うへへ',
+  'あへ',
+  'おへ',
+]);
+
+/**
+ * スペースなしの語中でも安全に「わ」と発音できる3文字以上の複合助詞パターン
+ */
+const IN_WORD_COMPOUND_HA_SUFFIXES = [
+  'からは',
+  'までは',
+  'だけは',
+  'ほどは',
+  'さえは',
+  'こそは',
+  'よりは',
+  'ばかりは',
+  'くらいは',
+  'ぐらいは',
+  'ながらは',
+];
+
+/**
+ * スペースなしの語中でも高確率で助詞・定型表現の「は→わ」となるフレーズ末尾パターン
+ */
+const IN_WORD_FIXED_HA_PHRASES = [
+  'こんにちは',
+  'こんばんは',
+  'あるいは',
+  'または',
+  'もしくは',
+  'すなわちは',
+  'それでは',
+  'ここでは',
+  'そこでは',
+  'あそこでは',
+  'いまでは',
+  'いつかは',
+  'いつもは',
+  'だれかは',
+  'だれもは',
+  'なにかは',
+  'どこかは',
+  'きょうは',
+  'あしたは',
+  'きのうは',
+  'むかしは',
+  'いまは',
+  'よるは',
+  'あさは',
+  'ぼくは',
+  'ぼくらは',
+  'わたしは',
+  'わたしたちは',
+  'きみは',
+  'きみたちは',
+  'あなたは',
+  'かれは',
+  'かのじょは',
+  'みんなは',
+  'ふたりは',
+  'ひとは',
+  'こころは',
+  'せかいは',
+  'そらは',
+  'かぜは',
+  'ほしは',
+  'ゆめは',
+  'あいは',
+  'ときは',
+  'ひかりは',
+  'なみだは',
+  'えがおは',
+  'おもいは',
+  'ことばは',
+  'うたは',
+  'みちは',
+  'それは',
+  'これは',
+  'あれは',
+  'ほんとうは',
+  'じつは',
+  'けっきょくは',
+  'つまりは',
+  'まずは',
+  'やがては',
+];
+
+/**
+ * 文節ごとのモーラ配列に対して、日本語の文脈に基づく助詞「は→わ」「へ→え」の自動発音推定を付与する
+ * ※ ユーザーが明示指定 (explicitPronunciation) したモーラには一切上書きしない
+ */
+export function annotateContextualPronunciations(wordLists: LyricToken[][]): void {
+  for (let wIdx = 0; wIdx < wordLists.length; wIdx++) {
+    const word = wordLists[wIdx];
+    const len = word.length;
+    if (len === 0) continue;
+
+    // 1. 単独1モーラ文節 ("ぼく は いく" / "うみ へ いく" 等)
+    // ※ "は な が さ く" のような1文字分かち書きで誤変換しないよう、直前文節が2モーラ以上の場合のみ助詞と判定
+    if (len === 1) {
+      const token = word[0];
+      if (!token.explicitPronunciation && wIdx > 0 && wordLists[wIdx - 1].length >= 2) {
+        if (token.display === 'は') {
+          token.autoPronunciation = 'わ';
+        } else if (token.display === 'へ') {
+          token.autoPronunciation = 'え';
+        }
+      }
+      continue;
+    }
+
+    const wordText = word.map((t) => t.display).join('');
+
+    for (let i = 0; i < len; i++) {
+      const token = word[i];
+      // 明示指定がある場合はそのまま尊重
+      if (token.explicitPronunciation) continue;
+
+      // ひらがなの「は」「へ」のみ対象（カタカナの「ハ」「ヘ」は外来語・擬音のため変換しない）
+      if (token.display !== 'は' && token.display !== 'へ') continue;
+
+      // 文節の先頭（語頭）の「は」「へ」は助詞ではないので変換しない (例: はる, はな, へや)
+      if (i === 0) continue;
+
+      const prevMora = word[i - 1].display;
+      // 促音直後（あっは、やっは、えっへ 等）は変換しない
+      if (prevMora === 'っ' || prevMora === 'ッ') continue;
+
+      const isEndOfWord = i === len - 1;
+
+      if (token.display === 'は') {
+        if (isEndOfWord) {
+          // 文節末の「は」: 例外語（母・笑い声・木の葉・言の葉等）以外は助詞として「わ」
+          if (
+            HA_WORD_END_EXCEPTIONS.has(wordText) ||
+            wordText.endsWith('はは') ||
+            wordText.endsWith('このは') ||
+            wordText.endsWith('ことのは')
+          ) {
+            continue;
+          }
+          token.autoPronunciation = 'わ';
+        } else {
+          // 文節途中の「は」（スペースなしで連続して書かれた場合: "きづいたときにはもう", "まばたきしてはみんな" 等）
+          const prefixStr = word
+            .slice(0, i + 1)
+            .map((t) => t.display)
+            .join('');
+          const afterStr = word
+            .slice(i + 1)
+            .map((t) => t.display)
+            .join('');
+
+          // 語中でも確実に「は (ha)」と発音するパターンの除外
+          if (
+            prefixStr.endsWith('はは') ||
+            prefixStr.endsWith('あは') ||
+            prefixStr.endsWith('うは') ||
+            prefixStr.endsWith('わは') ||
+            prefixStr.endsWith('がは') ||
+            prefixStr.endsWith('いろは') ||
+            prefixStr.endsWith('このは') ||
+            prefixStr.endsWith('ことのは')
+          ) {
+            continue;
+          }
+          if (prefixStr.endsWith('あさは') && afterStr.startsWith('か')) {
+            // あさはか (浅はか)
+            continue;
+          }
+          if (
+            prefixStr.endsWith('のは') &&
+            (afterStr.startsWith('ら') || afterStr.startsWith('な'))
+          ) {
+            // のはら (野原), のはな (野花)
+            continue;
+          }
+
+          let shouldConvertToWa = false;
+
+          // (A) 3文字以上の複合助詞 (からは, までは, だけは, ほどは, さえは, こそは, よりは 等)
+          if (IN_WORD_COMPOUND_HA_SUFFIXES.some((suf) => prefixStr.endsWith(suf))) {
+            shouldConvertToWa = true;
+          }
+
+          // (B) 2文字複合助詞 (には, では, ては, とは)
+          if (!shouldConvertToWa) {
+            if (prefixStr.endsWith('には') && i >= 2) {
+              // 例外: にはい (2杯), にはん (2班), にはち (二八), にはく (2泊)
+              if (!/^(?:い|ん|ち|く)/.test(afterStr)) {
+                shouldConvertToWa = true;
+              }
+            } else if (prefixStr.endsWith('では')) {
+              // 例外: ではいり (出入り), ではじめ (出始め), ではら (出払う)
+              if (!/^(?:いり|じめ|ら)/.test(afterStr)) {
+                if (i >= 2 || /^(?:ない|なく|あり|ある|なか)/.test(afterStr)) {
+                  shouldConvertToWa = true;
+                }
+              }
+            } else if (prefixStr.endsWith('ては') && i >= 2) {
+              // 例外: てはい (手配), てはじめ (手始め), てはず (手筈), てはば (手幅)
+              if (!/^(?:い|じめ|ず|ば)/.test(afterStr)) {
+                shouldConvertToWa = true;
+              }
+            } else if (prefixStr.endsWith('とは') && i >= 2) {
+              shouldConvertToWa = true;
+            }
+          }
+
+          // (C) 定型句・頻出の「主語+は」表現 (こんにちは, ぼくは, きょうは, それは 等)
+          if (!shouldConvertToWa) {
+            if (IN_WORD_FIXED_HA_PHRASES.some((phrase) => prefixStr.endsWith(phrase))) {
+              shouldConvertToWa = true;
+            }
+          }
+
+          if (shouldConvertToWa) {
+            token.autoPronunciation = 'わ';
+          }
+        }
+      } else if (token.display === 'へ') {
+        if (isEndOfWord) {
+          // 文節末の「へ」: 笑い声・感動詞以外は助詞として「え」 (例: うみへ, みらいへ, あしたへ)
+          if (
+            HE_WORD_END_EXCEPTIONS.has(wordText) ||
+            wordText.endsWith('へへ') ||
+            wordText.endsWith('えへ') ||
+            wordText.endsWith('うへ') ||
+            wordText.endsWith('てへ')
+          ) {
+            continue;
+          }
+          token.autoPronunciation = 'え';
+        } else {
+          // 文節途中の「へ」: 「〜へと」「〜への」のみ安全に変換 (例: みらいへと, きみへの)
+          if (wordText.includes('へとへと') || wordText.includes('へのへの')) {
+            continue;
+          }
+          const nextMora = word[i + 1].display;
+          if (nextMora === 'と' || nextMora === 'の') {
+            token.autoPronunciation = 'え';
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * フレーズ歌詞文字列 (例: "きづいた ときには", "きづいた ときには[わ]", "Twinkle little") を
+ * 音符1つ分に割り当てるモーラ＋発音情報配列に分割する
+ */
+export function tokenizeLyricsWithPronunciation(lyricsText: string): LyricToken[] {
   const cleaned = lyricsText.trim();
   if (!cleaned) return [];
 
-  // 明示的にスペースやカンマで全要素が区切られている場合（かつ英単語等を含む場合）はまず空白で分割し、
-  // 各トークンが日本語連続文字列ならさらにモーラ分割する
-  const tokens = cleaned.split(/[\s,、/]+/).filter(Boolean);
-  const result: string[] = [];
+  // 空白・読点・句点・感嘆符・疑問符・括弧類・スラッシュで文節チャンクに分割
+  const chunks = cleaned.split(/[\s,、。！？!?「」『』（）()・/]+/).filter(Boolean);
+  const wordLists: LyricToken[][] = [];
 
   // 小書き文字（前の文字と結合して1モーラになる文字）
   const smallKanaRegex = /^[ぁぃぅぇぉゃゅょゎァィゥェォャュョヮ]$/;
 
-  for (const token of tokens) {
-    // 英字のみで構成されるシラブル (例: "la", "lu", "do", "re", "mi", "love") はそのまま1音符に割り当て
-    if (/^[a-zA-Z'-]+$/.test(token)) {
-      result.push(token);
+  for (const chunk of chunks) {
+    // 英字シラブル単体 または 英字[発音] (例: "la", "love", "the[ざ]")
+    const romajiInlineMatch = chunk.match(/^([a-zA-Z'-]+)(?:[\[［]([^\]］]+)[\]］])?$/);
+    if (romajiInlineMatch) {
+      const display = romajiInlineMatch[1];
+      const explicitPronunciation = romajiInlineMatch[2]?.trim();
+      wordLists.push([
+        explicitPronunciation ? { display, explicitPronunciation } : { display },
+      ]);
       continue;
     }
 
-    // 日本語文字を1モーラずつ切り出す
-    const chars = Array.from(token);
+    // 日本語文字を1モーラずつ切り出し、直後の [発音] / ［発音］ を取り込む
+    const chars = Array.from(chunk);
+    const wordTokens: LyricToken[] = [];
     let i = 0;
     while (i < chars.length) {
       const ch = chars[i];
-      // 句読点や記号単体はスキップ（ただし長音記号「ー」「-」「~」「～」は1モーラとして残す）
-      if (/^[。、！？!?「」『』（）()・]$/.test(ch)) {
+      // 孤立した括弧記号はスキップ
+      if (ch === '[' || ch === ']' || ch === '［' || ch === '］') {
         i++;
         continue;
       }
@@ -102,11 +460,50 @@ export function tokenizeLyrics(lyricsText: string): string[] {
         i += 1;
       }
 
-      result.push(mora);
+      // モーラ直後に [発音] または ［発音］ が続く場合は明示的発音指定として取り込む
+      let explicitPronunciation: string | undefined;
+      if (i < chars.length && (chars[i] === '[' || chars[i] === '［')) {
+        const closeChar = chars[i] === '[' ? ']' : '］';
+        let closeIdx = -1;
+        for (let j = i + 1; j < chars.length; j++) {
+          if (chars[j] === closeChar || chars[j] === ']' || chars[j] === '］') {
+            closeIdx = j;
+            break;
+          }
+        }
+        if (closeIdx !== -1) {
+          const pron = chars.slice(i + 1, closeIdx).join('').trim();
+          if (pron) {
+            explicitPronunciation = pron;
+          }
+          i = closeIdx + 1;
+        }
+      }
+
+      wordTokens.push(
+        explicitPronunciation
+          ? { display: mora, explicitPronunciation }
+          : { display: mora }
+      );
+    }
+
+    if (wordTokens.length > 0) {
+      wordLists.push(wordTokens);
     }
   }
 
-  return result;
+  // 文節ごとの文脈に基づき助詞「は→わ」「へ→え」の自動推定を付与
+  annotateContextualPronunciations(wordLists);
+
+  return wordLists.flat();
+}
+
+/**
+ * フレーズ歌詞文字列 (例: "きらきらひかる", "しゃぼんだま とんだ", "Twinkle little") を
+ * 音符1つ分に割り当てるモーラ（拍）文字列配列に分割する
+ */
+export function tokenizeLyrics(lyricsText: string): string[] {
+  return tokenizeLyricsWithPronunciation(lyricsText).map((t) => t.display);
 }
 
 /**
@@ -455,7 +852,8 @@ function normalizeMoraForVoicevox(hira: string, vowel: VowelType): { safeHira: s
  * @param prevVowel 直前の音符の母音 (長音「ー」の母音引き継ぎ用)
  */
 export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): PhonemeInfo {
-  const raw = lyric.trim();
+  const inlineParsed = parseInlineLyric(lyric);
+  const raw = (inlineParsed.explicitPronunciation || inlineParsed.display).trim();
   if (!raw) {
     return {
       raw: 'あ',

@@ -1,7 +1,12 @@
 import { NoteEvent, RestEvent, ParsedScore, ParseError, Track, TempoEvent, TimeSignatureEvent, MasterKeyEvent, KeySignatureEvent, ParseMMLOptions, PedalEvent, MmlTimelineItem, RehearsalMarkEvent } from '../../types/mml';
 import { pitchToMidi, midiToPitch, parseDurationLength, getTripletInfo, getBeatsPerMeasure } from '../../utils/noteConverter';
 import { parseKeySignature, KeySignatureInfo, getDefaultKeySignature } from '../../utils/keySignature';
-import { tokenizeLyrics } from '../audio/vocalPhonemes';
+import {
+  LyricToken,
+  tokenizeLyricsWithPronunciation,
+  parseInlineLyric,
+  annotateContextualPronunciations,
+} from '../audio/vocalPhonemes';
 
 interface TrackState {
   id: number;
@@ -34,8 +39,9 @@ interface TrackState {
   explicitSlurNotes: NoteEvent[]; // 明示的スラーに属する音符リスト
   currentSlurGroupCount: number; // スラーグループ採番カウンタ
   currentTupletGroupCount: number; // 連符グループ採番カウンタ
-  lyricsQueue: string[]; // Lyrics("...") で登録された歌詞モーラの待機キュー
+  lyricsQueue: LyricToken[]; // Lyrics("...") で登録された歌詞モーラ（発音情報付き）の待機キュー
   hasConsumedCurrentLyrics: boolean; // 現在の歌詞キューから1文字以上消費したか
+  queueAssignedNotes: Set<NoteEvent>; // Lyrics("...") キューから割り当て済みのノート集合
 }
 
 export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScore {
@@ -98,6 +104,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         currentTupletGroupCount: 0,
         lyricsQueue: [],
         hasConsumedCurrentLyrics: false,
+        queueAssignedNotes: new Set<NoteEvent>(),
       });
     }
     return tracksMap.get(trackId)!;
@@ -233,9 +240,16 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     // 3. 歌詞キューからの自動割り当て（タイの後続音ではなく、かつ個別に歌詞が未指定の場合）
     if (notes.length > 0 && !notes[0].hasTieFromPrev) {
       if (!notes[0].lyric && track.lyricsQueue.length > 0) {
-        const nextLyric = track.lyricsQueue.shift();
-        if (nextLyric) {
-          notes[0].lyric = nextLyric;
+        const nextToken = track.lyricsQueue.shift();
+        if (nextToken && nextToken.display) {
+          notes[0].lyric = nextToken.display;
+          if (nextToken.explicitPronunciation) {
+            notes[0].lyricPronunciation = nextToken.explicitPronunciation;
+          }
+          if (nextToken.autoPronunciation) {
+            notes[0].autoLyricPronunciation = nextToken.autoPronunciation;
+          }
+          track.queueAssignedNotes.add(notes[0]);
           track.hasConsumedCurrentLyrics = true;
         }
       }
@@ -511,7 +525,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           lyricsCmdMatch[8] ??
           ''
         ).trim();
-        const tokens = tokenizeLyrics(rawLyricsText);
+        const tokens = tokenizeLyricsWithPronunciation(rawLyricsText);
         if (isAdd || !currentTrack.hasConsumedCurrentLyrics) {
           currentTrack.lyricsQueue.push(...tokens);
         } else {
@@ -897,6 +911,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
           isKeyAltered?: boolean;
           accidentalType?: '#' | 'b' | 'n';
           lyric?: string;
+          lyricPronunciation?: string;
           chordNotes?: {
             pitch: string;
             midiNote: number;
@@ -1030,8 +1045,11 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
 
               const afterCloseChord = tRemaining.slice(closeBracket + 1);
               const chordLyricMatch = afterCloseChord.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
-              const chordInlineLyric = chordLyricMatch
+              const rawChordInlineLyric = chordLyricMatch
                 ? (chordLyricMatch[1] ?? chordLyricMatch[2] ?? chordLyricMatch[3] ?? '').trim()
+                : undefined;
+              const parsedChordInline = rawChordInlineLyric
+                ? parseInlineLyric(rawChordInlineLyric)
                 : undefined;
               const chordExtraLen = chordLyricMatch ? chordLyricMatch[0].length : 0;
 
@@ -1043,18 +1061,20 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 isStrum,
                 strumDirection,
                 strumDelaySec,
-                lyric: chordInlineLyric || undefined,
+                lyric: parsedChordInline?.display || undefined,
+                lyricPronunciation: parsedChordInline?.explicitPronunciation,
               });
               tIdx += closeBracket + 1 + chordExtraLen;
               continue;
             }
           }
 
-          // 単音符 (連符内: c"き" 等にも対応)
+          // 単音符 (連符内: c"き", c"は[わ]" 等にも対応)
           const nMatch = tRemaining.match(/^([a-gA-G])([#\+\-_=n♯♭♮]?)(?:"([^"]*)"|'([^']*)'|「([^」]*)」)?/i);
           if (nMatch) {
             const resolved = resolvePitchWithKey(nMatch[1], nMatch[2] || '', tempOctave, currentTrack);
-            const inlineLyric = (nMatch[3] ?? nMatch[4] ?? nMatch[5] ?? '').trim();
+            const rawInlineLyric = (nMatch[3] ?? nMatch[4] ?? nMatch[5] ?? '').trim();
+            const parsedInline = rawInlineLyric ? parseInlineLyric(rawInlineLyric) : undefined;
             tupletItems.push({
               type: 'note',
               colOffset: tIdx,
@@ -1065,7 +1085,8 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
               keyShift: resolved.totalShift,
               isKeyAltered: resolved.isKeyAltered,
               accidentalType: resolved.accidentalType,
-              lyric: inlineLyric || undefined,
+              lyric: parsedInline?.display || undefined,
+              lyricPronunciation: parsedInline?.explicitPronunciation,
             });
             tIdx += nMatch[0].length;
             continue;
@@ -1131,6 +1152,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletNumber: numNotes,
                 tupletOccupied: notesOccupied,
                 lyric: item.lyric,
+                lyricPronunciation: item.lyricPronunciation,
                 line: lineNumber,
                 column: itemCol,
               };
@@ -1165,6 +1187,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletNumber: numNotes,
                 tupletOccupied: notesOccupied,
                 lyric: cnIdx === 0 ? item.lyric : undefined,
+                lyricPronunciation: cnIdx === 0 ? item.lyricPronunciation : undefined,
                 line: lineNumber,
                 column: itemCol,
               }));
@@ -1278,13 +1301,18 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             lenCharsUsed += trailingStrumMatch[0].length;
           }
 
-          // 5. 和音直後の歌詞指定: [ceg]4"ら"
+          // 5. 和音直後の歌詞指定: [ceg]4"ら", [ceg]4"は[わ]"
           const afterChordLenAndStrum = afterChord.slice(lenCharsUsed);
           const chordInlineLyricMatch = afterChordLenAndStrum.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
           let chordInlineLyric: string | undefined = undefined;
+          let chordInlinePronunciation: string | undefined = undefined;
           if (chordInlineLyricMatch) {
             const rawLyr = (chordInlineLyricMatch[1] ?? chordInlineLyricMatch[2] ?? chordInlineLyricMatch[3] ?? '').trim();
-            if (rawLyr) chordInlineLyric = rawLyr;
+            if (rawLyr) {
+              const parsed = parseInlineLyric(rawLyr);
+              chordInlineLyric = parsed.display || undefined;
+              chordInlinePronunciation = parsed.explicitPronunciation;
+            }
             lenCharsUsed += chordInlineLyricMatch[0].length;
           }
 
@@ -1360,6 +1388,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
                 tupletNumber: chordTripInfo ? 3 : undefined,
                 tupletOccupied: chordTripInfo ? 2 : undefined,
                 lyric: partIdx === 0 && pIdx === 0 ? chordInlineLyric : undefined,
+                lyricPronunciation: partIdx === 0 && pIdx === 0 ? chordInlinePronunciation : undefined,
                 line: lineNumber,
                 column: col + 1,
               }));
@@ -1452,7 +1481,10 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         const preLenLyric = (singleNoteMatch[3] ?? singleNoteMatch[4] ?? singleNoteMatch[5] ?? '').trim();
         const noteLenStr = singleNoteMatch[6] || '';
         const postLenLyric = (singleNoteMatch[7] ?? singleNoteMatch[8] ?? singleNoteMatch[9] ?? '').trim();
-        const inlineLyric = postLenLyric || preLenLyric || undefined;
+        const rawInlineLyric = postLenLyric || preLenLyric || undefined;
+        const parsedInline = rawInlineLyric ? parseInlineLyric(rawInlineLyric) : undefined;
+        const inlineLyric = parsedInline?.display || undefined;
+        const inlinePronunciation = parsedInline?.explicitPronunciation;
         const resolved = resolvePitchWithKey(noteLetter, rawAcc, currentTrack.octave, currentTrack);
 
         const hasTrailingTie = /[\^&]$/.test(noteLenStr);
@@ -1485,6 +1517,7 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
             tupletNumber: tripInfo ? 3 : undefined,
             tupletOccupied: tripInfo ? 2 : undefined,
             lyric: partIdx === 0 ? inlineLyric : undefined,
+            lyricPronunciation: partIdx === 0 ? inlinePronunciation : undefined,
             line: lineNumber,
             column: col + 1,
           };
@@ -1506,12 +1539,20 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
         continue;
       }
 
-      // 12.5 スペースを挟んで記述された単独の歌詞リテラル (例: c4 "き")
+      // 12.5 スペースを挟んで記述された単独の歌詞リテラル (例: c4 "き", c4 "は[わ]")
       const standaloneLyricMatch = remaining.match(/^(?:"([^"]*)"|'([^']*)'|「([^」]*)」)/);
       if (standaloneLyricMatch) {
         const rawLyr = (standaloneLyricMatch[1] ?? standaloneLyricMatch[2] ?? standaloneLyricMatch[3] ?? '').trim();
         if (rawLyr && currentTrack.lastNoteGroup && currentTrack.lastNoteGroup.length > 0) {
-          currentTrack.lastNoteGroup[0].lyric = rawLyr;
+          const parsed = parseInlineLyric(rawLyr);
+          currentTrack.lastNoteGroup[0].lyric = parsed.display || rawLyr;
+          if (parsed.explicitPronunciation) {
+            currentTrack.lastNoteGroup[0].lyricPronunciation = parsed.explicitPronunciation;
+          } else {
+            delete currentTrack.lastNoteGroup[0].lyricPronunciation;
+          }
+          delete currentTrack.lastNoteGroup[0].autoLyricPronunciation;
+          currentTrack.queueAssignedNotes.delete(currentTrack.lastNoteGroup[0]);
         }
         col += standaloneLyricMatch[0].length;
         continue;
@@ -1556,6 +1597,62 @@ export function parseMML(mmlCode: string, options?: ParseMMLOptions): ParsedScor
     const sortedTimeSig = ts.timeSignatureEvents.sort((a, b) => a.time - b.time);
     const sortedNotes = ts.notes.sort((a, b) => a.startTime - b.startTime);
     const sortedRests = ts.rests.sort((a, b) => a.startTime - b.startTime);
+
+    // 音符個別指定（c"と" d"き" e"に" f"は" 等）の連続フレーズにも文脈による助詞発音推定を適用
+    const inlinePhrases: { note: NoteEvent; token: LyricToken }[][] = [];
+    let currentPhrase: { note: NoteEvent; token: LyricToken }[] = [];
+    let prevEndBeat: number | null = null;
+
+    const flushInlinePhrase = () => {
+      if (currentPhrase.length > 0) {
+        inlinePhrases.push(currentPhrase);
+        currentPhrase = [];
+      }
+    };
+
+    for (const note of sortedNotes) {
+      if (note.hasTieFromPrev) {
+        if (prevEndBeat !== null) {
+          prevEndBeat = Math.max(prevEndBeat, note.startTime + note.duration);
+        }
+        continue;
+      }
+
+      const isInlineLyricNote =
+        Boolean(note.lyric && note.lyric.trim().length > 0) && !ts.queueAssignedNotes.has(note);
+
+      if (!isInlineLyricNote) {
+        flushInlinePhrase();
+        prevEndBeat = null;
+        continue;
+      }
+
+      if (prevEndBeat !== null && note.startTime - prevEndBeat > 0.05) {
+        flushInlinePhrase();
+      }
+
+      currentPhrase.push({
+        note,
+        token: {
+          display: note.lyric!.trim(),
+          explicitPronunciation: note.lyricPronunciation,
+        },
+      });
+      prevEndBeat = note.startTime + note.duration;
+    }
+    flushInlinePhrase();
+
+    if (inlinePhrases.length > 0) {
+      const wordLists = inlinePhrases.map((ph) => ph.map((entry) => entry.token));
+      annotateContextualPronunciations(wordLists);
+      inlinePhrases.forEach((ph) => {
+        ph.forEach(({ note, token }) => {
+          if (token.autoPronunciation && !note.lyricPronunciation) {
+            note.autoLyricPronunciation = token.autoPronunciation;
+          }
+        });
+      });
+    }
     // トラックの代表音色は「最初に発音される音符の音色」とする
     // (曲の途中で楽器を変更・復帰した場合でも、最後に指定された音色で上書きされないようにする)
     const initialInstrument = sortedNotes.length > 0 && sortedNotes[0].instrument !== undefined

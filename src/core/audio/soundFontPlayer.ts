@@ -6,7 +6,7 @@ import {
   scheduleFormantVocalNote,
   vocalSettingsManager,
 } from './vocalSynth';
-import { parseLyricToPhoneme, VowelType } from './vocalPhonemes';
+import { parseLyricToPhoneme, resolveNotePronunciation, VowelType } from './vocalPhonemes';
 import { voicevoxClient, VoicevoxNoteInput } from './voicevoxClient';
 
 export interface PlayerCallback {
@@ -334,6 +334,8 @@ export class AudioEngine {
    */
   private extractVocalTracksData(score: ParsedScore): ExtractedVocalTrack[] {
     const result: ExtractedVocalTrack[] = [];
+    const vocalSettings = vocalSettingsManager.getSettings();
+    const autoConvertParticles = vocalSettings.autoConvertParticlePronunciation !== false;
 
     score.tracks.forEach((track) => {
       const vocalItems: ResolvedVocalItem[] = [];
@@ -369,7 +371,7 @@ export class AudioEngine {
 
         const startSec = this.beatToSec(note.startTime);
         const endSec = this.beatToSec(effectiveEndBeat);
-        const lyricText = note.lyric && note.lyric.trim().length > 0 ? note.lyric.trim() : 'ら';
+        const lyricText = resolveNotePronunciation(note, autoConvertParticles);
 
         vocalItems.push({
           note,
@@ -1592,6 +1594,7 @@ export class AudioEngine {
     masterGain.connect(offlineCtx.destination);
 
     const vocalSettings = vocalSettingsManager.getSettings();
+    const autoConvertParticles = vocalSettings.autoConvertParticlePronunciation !== false;
     const shouldTryVoicevox =
       vocalSettings.engineMode === 'voicevox' ||
       (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
@@ -1638,7 +1641,7 @@ export class AudioEngine {
         const noteDurSec = Math.max(0.02, noteEndSec - noteStartSec);
 
         if (isVocal) {
-          const lyricText = note.lyric && note.lyric.trim().length > 0 ? note.lyric.trim() : 'ら';
+          const lyricText = resolveNotePronunciation(note, autoConvertParticles);
           vvInputs.push({
             midiNote: note.midiNote,
             startSec: noteStartSec,

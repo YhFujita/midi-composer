@@ -289,6 +289,12 @@ export const MmlGuideModal: React.FC<MmlGuideModalProps> = ({ isOpen, onClose })
                 </p>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
+                <code className="text-pink-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-pink-300 inline-block">Lyrics(&quot;きづいた ときには&quot;) / は[わ] / は[は] / c4&quot;は[わ]&quot;</code>
+                <p className="text-slate-700 mt-1.5 font-medium">
+                  🗣️ <strong>日本語の発音制御（は→わ / へ→え）</strong>: 文節末や複合助詞の「は」「へ」は、楽譜表示を「は」「へ」のまま保ちつつ歌唱時（VOICEVOX・内蔵シンセ）に自動で「わ」「え」と発音します。任意の文字の発音を明示的に指定・上書きしたい場合は <code className="bg-white px-1 py-0.2 rounded border border-slate-300">ときには[わ]</code>（強制わ）、<code className="bg-white px-1 py-0.2 rounded border border-slate-300">なは[は]</code>（強制は）、<code className="bg-white px-1 py-0.2 rounded border border-slate-300">うみへ[え]</code> のように直後に角括弧（全角 <code>［］</code> も可）で読みを指定できます。
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 sm:col-span-2 shadow-sm">
                 <code className="text-pink-800 font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-pink-300 inline-block">Voice(129) / Vocal / ヘッダー「歌声・ボカロ設定」</code>
                 <p className="text-slate-700 mt-1.5 font-medium">
                   🎶 <strong>内蔵フォルマント合成 &amp; VOICEVOX連携</strong>: ブラウザ単体で動作するWeb Audioフォルマント歌声シンセ（女声・ウィスパー・男声・チップボーカル）に加え、PC上で無料の「VOICEVOX」を起動して接続すると本格的なAI歌声合成で歌わせることができます。MIDI出力時にも標準の歌詞メタイベント（SMF Lyric）として書き出されます。

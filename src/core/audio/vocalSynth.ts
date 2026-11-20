@@ -12,6 +12,8 @@ export interface VocalSettings {
   character: VocalCharacterType;
   /** 歌詞が付いた音符は楽器番号に関わらずすべて自動で歌わせるか (true 推奨) */
   singAllLyricNotes: boolean;
+  /** 日本語の助詞「は→わ」「へ→え」を文脈に応じて自動発音変換するか (true 推奨) */
+  autoConvertParticlePronunciation: boolean;
   /** ビブラートの深さ (0.0 〜 2.0, デフォルト 1.0) */
   vibratoDepth: number;
   /** 歌声のマスター音量 (0.0 〜 2.0, デフォルト 1.2) */
@@ -28,6 +30,7 @@ export const DEFAULT_VOCAL_SETTINGS: VocalSettings = {
   engineMode: 'auto',
   character: 'idol',
   singAllLyricNotes: true,
+  autoConvertParticlePronunciation: true,
   vibratoDepth: 1.0,
   vocalVolume: 1.25,
   accompanimentLayerGain: 0.2,

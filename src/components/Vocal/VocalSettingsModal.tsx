@@ -283,6 +283,27 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
                 />
               </label>
 
+              {/* 日本語助詞の自動発音変換 (は→わ / へ→え) */}
+              <label className="flex items-center justify-between gap-3 cursor-pointer select-none pt-2 border-t border-slate-200">
+                <div>
+                  <div className="text-xs font-bold text-slate-900">
+                    助詞「は→わ」「へ→え」を文脈で自動発音変換する
+                  </div>
+                  <div className="text-[11px] text-slate-600 leading-relaxed">
+                    ONの場合、「きづいた ときには」「はるのおがわは」「うみへ」等の助詞を、楽譜表記は変えずに「わ」「え」で自然に歌唱します。個別に発音を強制したい場合は <code className="bg-white px-1 py-0.2 rounded border border-slate-300 text-slate-800 font-mono">は[わ]</code> / <code className="bg-white px-1 py-0.2 rounded border border-slate-300 text-slate-800 font-mono">は[は]</code> / <code className="bg-white px-1 py-0.2 rounded border border-slate-300 text-slate-800 font-mono">へ[え]</code>（全角 <code className="bg-white px-1 py-0.2 rounded border border-slate-300 text-slate-800 font-mono">［わ］</code> 可）で制御できます。
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoConvertParticlePronunciation !== false}
+                  onChange={(e) => {
+                    voicevoxClient.clearCache();
+                    update({ autoConvertParticlePronunciation: e.target.checked });
+                  }}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer flex-shrink-0"
+                />
+              </label>
+
               {/* 歌声ボリューム */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
