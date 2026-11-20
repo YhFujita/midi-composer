@@ -6,13 +6,14 @@ import {
   scheduleFormantVocalNote,
   vocalSettingsManager,
 } from './vocalSynth';
-import { VowelType } from './vocalPhonemes';
+import { parseLyricToPhoneme, VowelType } from './vocalPhonemes';
 import { voicevoxClient, VoicevoxNoteInput } from './voicevoxClient';
 
 export interface PlayerCallback {
   onProgress?: (currentTimeSec: number, currentBeat: number, totalDurationSec: number) => void;
   onEnded?: () => void;
   onVocalPreparing?: (isPreparing: boolean) => void;
+  onVocalError?: (errorMessage: string | null) => void;
 }
 
 interface ResolvedVocalItem {
@@ -428,20 +429,7 @@ export class AudioEngine {
         vocalItems.forEach((item) => {
           if (item.endSec <= currentOffsetSec) {
             // すでに過ぎたノートでも母音の引き継ぎ（長音「ー」用）だけ更新
-            const res = scheduleFormantVocalNote(
-              ctx,
-              item.note.midiNote,
-              item.lyric,
-              prevVowel,
-              0,
-              0.01,
-              0,
-              vocalMaster,
-              vocalSettings,
-              item.isSlurredFromPrev
-            );
-            prevVowel = res.vowel;
-            res.stop(0);
+            prevVowel = parseLyricToPhoneme(item.lyric, prevVowel).vowel;
             return;
           }
 
@@ -510,13 +498,25 @@ export class AudioEngine {
   /**
    * 伴奏と歌声を同一基準時刻から一斉に再生開始する内部メソッド
    */
-  private startActualPlayback(
+  private async startActualPlayback(
     score: ParsedScore,
     startOffsetSec: number,
-    vocalTracksData: ExtractedVocalTrack[]
+    vocalTracksData: ExtractedVocalTrack[],
+    sessionId?: number
   ) {
     if (!this.audioCtx || !this.isPlaying) return;
+    if (sessionId !== undefined && this.playSessionId !== sessionId) return;
+
     const ctx = this.audioCtx;
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {
+        // ignore
+      }
+    }
+    if (!this.isPlaying || (sessionId !== undefined && this.playSessionId !== sessionId)) return;
+
     const now = ctx.currentTime;
     this.startTimeSec = now - startOffsetSec;
 
@@ -572,6 +572,17 @@ export class AudioEngine {
     const ctx = this.initAudioContext();
     this.stop();
 
+    // ユーザークリックの同期タイミングで1サンプルの無音バッファを再生してAudioContextの自動サスペンドを防止
+    try {
+      const unlockBuf = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const unlockSrc = ctx.createBufferSource();
+      unlockSrc.buffer = unlockBuf;
+      unlockSrc.connect(ctx.destination);
+      unlockSrc.start(0);
+    } catch {
+      // ignore
+    }
+
     const sessionId = ++this.playSessionId;
 
     this.currentScore = score;
@@ -579,6 +590,7 @@ export class AudioEngine {
     this.isPlaying = true;
     this.isPaused = false;
     this.pausedAtSec = startOffsetSec;
+    this.callbacks.onVocalError?.(null);
 
     // もし SoundFont がまだ準備できていなければ裏でロード試行
     if (!this.isSoundFontReady) {
@@ -602,20 +614,26 @@ export class AudioEngine {
       Promise.all(
         uncachedVocalTracks.map((td) => voicevoxClient.synthesizeTrackVocal(ctx, td.vvInputs))
       )
-        .then(() => {
+        .then((results) => {
           if (this.playSessionId !== sessionId || !this.isPlaying) return;
           this.isPreparingVocal = false;
           this.callbacks.onVocalPreparing?.(false);
-          this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+          if (results.some((r) => r === null) && voicevoxClient.getLastError()) {
+            this.callbacks.onVocalError?.(voicevoxClient.getLastError());
+          }
+          this.startActualPlayback(score, startOffsetSec, vocalTracksData, sessionId);
         })
         .catch(() => {
           if (this.playSessionId !== sessionId || !this.isPlaying) return;
           this.isPreparingVocal = false;
           this.callbacks.onVocalPreparing?.(false);
-          this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+          if (voicevoxClient.getLastError()) {
+            this.callbacks.onVocalError?.(voicevoxClient.getLastError());
+          }
+          this.startActualPlayback(score, startOffsetSec, vocalTracksData, sessionId);
         });
     } else {
-      this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+      this.startActualPlayback(score, startOffsetSec, vocalTracksData, sessionId);
     }
   }
 
@@ -1127,7 +1145,7 @@ export class AudioEngine {
   }
 
   /**
-   * ボーカル歌声のプレビュー試聴 ("ど・れ・み・ふぁ・そ" を歌う)
+   * ボーカル歌声のプレビュー試聴 ("ど・れ・み・ふぁ・そ" を内蔵フォルマント合成で歌う)
    */
   public previewVocal(sampleLyrics: string[] = ['ど', 'れ', 'み', 'ふぁ', 'そ']) {
     const ctx = this.initAudioContext();
@@ -1161,6 +1179,59 @@ export class AudioEngine {
       );
       prevVowel = res.vowel;
     });
+  }
+
+  /**
+   * VOICEVOX サーバーを使ったテスト歌唱プレビュー ("ど・れ・み" を合成して再生)
+   */
+  public async previewVoicevoxVocal(
+    sampleLyrics: string[] = ['ど', 'れ', 'み']
+  ): Promise<{ ok: boolean; error?: string }> {
+    const ctx = this.initAudioContext();
+    try {
+      const unlockBuf = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const unlockSrc = ctx.createBufferSource();
+      unlockSrc.buffer = unlockBuf;
+      unlockSrc.connect(ctx.destination);
+      unlockSrc.start(0);
+    } catch {
+      // ignore
+    }
+
+    const midis = [60, 62, 64];
+    const vvInputs: VoicevoxNoteInput[] = midis.map((midi, idx) => ({
+      midiNote: midi,
+      startSec: idx * 0.45,
+      endSec: idx * 0.45 + (idx === midis.length - 1 ? 0.65 : 0.45),
+      lyric: sampleLyrics[idx] || 'ら',
+    }));
+
+    const clip = await voicevoxClient.synthesizeTrackVocal(ctx, vvInputs);
+    if (!clip) {
+      return {
+        ok: false,
+        error: voicevoxClient.getLastError() || 'VOICEVOX でのテスト歌声合成に失敗しました。',
+      };
+    }
+
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {
+        // ignore
+      }
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = clip.audioBuffer;
+    const gain = ctx.createGain();
+    const vol = vocalSettingsManager.getSettings().vocalVolume ?? 1.25;
+    gain.gain.setValueAtTime(vol * 0.95, ctx.currentTime);
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(ctx.currentTime);
+
+    return { ok: true };
   }
 
   /**

@@ -387,6 +387,69 @@ function parseRomajiSyllable(romaji: string): { c: ConsonantType; v: VowelType; 
 }
 
 /**
+ * VOICEVOX Engine の歌唱辞書 (MORA_KANA_TO_MORA_PHONEMES) でエラーになる表記（ヲ, ヂ, ヅ, ヰ, ヱ, 小書き単体等）を
+ * 発音どおりの標準ひらがな1モーラに正規化するマップ
+ */
+const VOICEVOX_PRONUNCIATION_HIRA_MAP: Record<string, string> = {
+  'を': 'お',
+  'ゐ': 'い',
+  'ゑ': 'え',
+  'ぢ': 'じ',
+  'づ': 'ず',
+  'ぢゃ': 'じゃ',
+  'ぢゅ': 'じゅ',
+  'ぢょ': 'じょ',
+  'ぁ': 'あ',
+  'ぃ': 'い',
+  'ぅ': 'う',
+  'ぇ': 'え',
+  'ぉ': 'お',
+  'ゃ': 'や',
+  'ゅ': 'ゆ',
+  'ょ': 'よ',
+  'ゎ': 'わ',
+  'ゔぁ': 'ば',
+  'ゔぃ': 'び',
+  'ゔ': 'ぶ',
+  'ゔぇ': 'べ',
+  'ゔぉ': 'ぼ',
+};
+
+/**
+ * VOICEVOX の歌唱APIが確実に受け付ける有効なカタカナモーラ集合
+ */
+const VALID_VOICEVOX_KATAKANA_MORAS = new Set<string>([
+  'ア', 'イ', 'ウ', 'エ', 'オ',
+  'カ', 'キ', 'ク', 'ケ', 'コ', 'キャ', 'キュ', 'キェ', 'キョ',
+  'サ', 'シ', 'ス', 'セ', 'ソ', 'シャ', 'シュ', 'シェ', 'ショ', 'スィ',
+  'タ', 'チ', 'ツ', 'テ', 'ト', 'チャ', 'チュ', 'チェ', 'チョ', 'ツァ', 'ツィ', 'ツェ', 'ツォ', 'ティ', 'テュ', 'トゥ',
+  'ナ', 'ニ', 'ヌ', 'ネ', 'ノ', 'ニャ', 'ニュ', 'ニェ', 'ニョ',
+  'ハ', 'ヒ', 'フ', 'ヘ', 'ホ', 'ヒャ', 'ヒュ', 'ヒェ', 'ヒョ', 'ファ', 'フィ', 'フェ', 'フォ', 'フュ',
+  'マ', 'ミ', 'ム', 'メ', 'モ', 'ミャ', 'ミュ', 'ミェ', 'ミョ',
+  'ヤ', 'ユ', 'イェ', 'ヨ',
+  'ラ', 'リ', 'ル', 'レ', 'ロ', 'リャ', 'リュ', 'リェ', 'リョ',
+  'ワ', 'ウィ', 'ウェ', 'ウォ', 'ン',
+  'ガ', 'ギ', 'グ', 'ゲ', 'ゴ', 'ギャ', 'ギュ', 'ギェ', 'ギョ',
+  'ザ', 'ジ', 'ズ', 'ゼ', 'ゾ', 'ジャ', 'ジュ', 'ジェ', 'ジョ', 'ズィ',
+  'ダ', 'デ', 'ド', 'ディ', 'デュ', 'ドゥ',
+  'バ', 'ビ', 'ブ', 'ベ', 'ボ', 'ビャ', 'ビュ', 'ビェ', 'ビョ',
+  'パ', 'ピ', 'プ', 'ペ', 'ポ', 'ピャ', 'ピュ', 'ピェ', 'ピョ',
+]);
+
+function normalizeMoraForVoicevox(hira: string, vowel: VowelType): { safeHira: string; safeKata: string } {
+  const mappedHira = VOICEVOX_PRONUNCIATION_HIRA_MAP[hira] || hira;
+  const candidateKata = hiraganaToKatakana(mappedHira);
+  if (VALID_VOICEVOX_KATAKANA_MORAS.has(candidateKata)) {
+    return { safeHira: mappedHira, safeKata: candidateKata };
+  }
+  const fallbackVowelHira: Record<VowelType, string> = {
+    a: 'あ', i: 'い', u: 'う', e: 'え', o: 'お', n: 'ん',
+  };
+  const fbHira = fallbackVowelHira[vowel] || 'あ';
+  return { safeHira: fbHira, safeKata: hiraganaToKatakana(fbHira) };
+}
+
+/**
  * 1つの音符の歌詞文字列 (例: "き", "しゃ", "ー", "la") から音素情報を取得する
  * @param lyric 音符に付与された歌詞
  * @param prevVowel 直前の音符の母音 (長音「ー」の母音引き継ぎ用)
@@ -424,7 +487,7 @@ export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): 
     };
   }
 
-  // 促音単体 ("っ", "ッ")
+  // 促音単体 ("っ", "ッ") -> 単一ノートに割り当てられた場合はVOICEVOXエラー防止のため直前母音を発音しつつスタッカート化
   if (raw === 'っ' || raw === 'ッ') {
     const vowelToHira: Record<VowelType, string> = {
       a: 'あ', i: 'い', u: 'う', e: 'え', o: 'お', n: 'ん',
@@ -432,8 +495,8 @@ export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): 
     const hira = vowelToHira[prevVowel] || 'あ';
     return {
       raw,
-      hiragana: 'っ',
-      katakana: 'ッ',
+      hiragana: hira,
+      katakana: hiraganaToKatakana(hira),
       consonant: '',
       vowel: prevVowel,
       isStaccatoMora: true,
@@ -445,10 +508,11 @@ export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): 
 
   if (HIRAGANA_MORA_MAP[hira]) {
     const entry = HIRAGANA_MORA_MAP[hira];
+    const { safeHira, safeKata } = normalizeMoraForVoicevox(hira, entry.v);
     return {
       raw,
-      hiragana: hira,
-      katakana: hiraganaToKatakana(hira),
+      hiragana: safeHira,
+      katakana: safeKata,
       consonant: entry.c,
       vowel: entry.v,
       hasGlideY: entry.y,
@@ -462,10 +526,11 @@ export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): 
   if (subTokens.length > 0 && HIRAGANA_MORA_MAP[subTokens[0]]) {
     const firstMora = subTokens[0];
     const entry = HIRAGANA_MORA_MAP[firstMora];
+    const { safeHira, safeKata } = normalizeMoraForVoicevox(firstMora, entry.v);
     return {
       raw,
-      hiragana: firstMora,
-      katakana: hiraganaToKatakana(firstMora),
+      hiragana: safeHira,
+      katakana: safeKata,
       consonant: entry.c,
       vowel: entry.v,
       hasGlideY: entry.y,
@@ -477,10 +542,11 @@ export function parseLyricToPhoneme(lyric: string, prevVowel: VowelType = 'a'): 
   // ローマ字・英語の解析
   if (/^[a-zA-Z'-]+$/.test(raw)) {
     const rom = parseRomajiSyllable(raw);
+    const { safeHira, safeKata } = normalizeMoraForVoicevox(katakanaToHiragana(rom.kata), rom.v);
     return {
       raw,
-      hiragana: katakanaToHiragana(rom.kata),
-      katakana: rom.kata,
+      hiragana: safeHira,
+      katakana: safeKata,
       consonant: rom.c,
       vowel: rom.v,
     };

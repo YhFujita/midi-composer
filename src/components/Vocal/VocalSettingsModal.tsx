@@ -59,15 +59,24 @@ const CHARACTER_OPTIONS: {
 export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, onClose }) => {
   const [settings, setSettings] = useState<VocalSettings>(vocalSettingsManager.getSettings());
   const [isCheckingVv, setIsCheckingVv] = useState(false);
+  const [isPreviewingVv, setIsPreviewingVv] = useState(false);
   const [vvConnected, setVvConnected] = useState(voicevoxClient.getConnectionStatus());
   const [vvSingers, setVvSingers] = useState<VoicevoxSinger[]>(voicevoxClient.getSingers());
-  const [vvError, setVvError] = useState<string | null>(null);
+  const [vvError, setVvError] = useState<string | null>(voicevoxClient.getLastError());
 
   useEffect(() => {
     return vocalSettingsManager.subscribe((newSettings) => {
       setSettings(newSettings);
     });
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      setVvConnected(voicevoxClient.getConnectionStatus());
+      setVvSingers(voicevoxClient.getSingers());
+      setVvError(voicevoxClient.getLastError());
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -82,6 +91,16 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
     setIsCheckingVv(false);
     setVvConnected(res.ok);
     setVvSingers(res.singers);
+    if (!res.ok && res.error) {
+      setVvError(res.error);
+    }
+  };
+
+  const handlePreviewVoicevox = async () => {
+    setIsPreviewingVv(true);
+    setVvError(null);
+    const res = await audioEngine.previewVoicevoxVocal(['ど', 'れ', 'み']);
+    setIsPreviewingVv(false);
     if (!res.ok && res.error) {
       setVvError(res.error);
     }
@@ -376,29 +395,40 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
               )}
 
               {vvConnected && vvSingers.length > 0 && (
-                <div className="space-y-1.5 pt-1">
+                <div className="space-y-2 pt-1">
                   <label className="text-xs font-bold text-slate-800 block">
                     VOICEVOX シンガー（キャラクター / スタイル）選択:
                   </label>
-                  <select
-                    value={settings.voicevoxSpeakerId}
-                    onChange={(e) => {
-                      voicevoxClient.clearCache();
-                      update({ voicevoxSpeakerId: parseInt(e.target.value, 10) });
-                    }}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-medium outline-none focus:border-blue-600"
-                    style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                  >
-                    {vvSingers.map((singer) => (
-                      <optgroup key={singer.speaker_uuid} label={singer.name}>
-                        {singer.styles.map((st) => (
-                          <option key={st.id} value={st.id}>
-                            {singer.name} - {st.name} (ID: {st.id})
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={settings.voicevoxSpeakerId}
+                      onChange={(e) => {
+                        voicevoxClient.clearCache();
+                        update({ voicevoxSpeakerId: parseInt(e.target.value, 10) });
+                      }}
+                      className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-medium outline-none focus:border-blue-600"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                    >
+                      {vvSingers.map((singer) => (
+                        <optgroup key={singer.speaker_uuid} label={singer.name}>
+                          {singer.styles.map((st) => (
+                            <option key={st.id} value={st.id}>
+                              {singer.name} - {st.name} (ID: {st.id}{st.type ? ` / ${st.type}` : ''})
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handlePreviewVoicevox}
+                      disabled={isPreviewingVv}
+                      className="flex items-center justify-center space-x-1.5 px-3.5 py-1.5 bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Volume2 className={`w-3.5 h-3.5 ${isPreviewingVv ? 'animate-pulse' : ''}`} />
+                      <span>{isPreviewingVv ? 'VOICEVOX合成中...' : '🎤 VOICEVOX 試聴'}</span>
+                    </button>
+                  </div>
                 </div>
               )}
 

@@ -407,9 +407,10 @@ export function scheduleFormantVocalNote(
     );
   }
 
-  const voiceStart = startAudioTime + voiceOnsetDelay;
+  const voiceStart = Math.max(0, startAudioTime + voiceOnsetDelay);
   const releaseSec = phoneme.isStaccatoMora ? 0.03 : 0.08;
-  const stopTime = startAudioTime + effectiveDurSec + releaseSec;
+  const noteReleaseStart = Math.max(voiceStart + 0.045, startAudioTime + effectiveDurSec);
+  const stopTime = noteReleaseStart + releaseSec;
 
   // 2. 声帯オシレータ群（メインノコギリ波 ＋ デチューンコーラス波 ＋ 基音補強三角波）
   const oscMain = ctx.createOscillator();
@@ -559,30 +560,33 @@ export function scheduleFormantVocalNote(
   fundamentalLp.connect(fundamentalGain);
   fundamentalGain.connect(formantSum);
 
-  // 5. 音量エンベロープ (ADSR)
+  // 5. 音量エンベロープ (ADSR: 時刻が必ず単調増加になるよう厳密に保護)
   const noteEnvelope = ctx.createGain();
-  const attackTime = phoneme.consonant === 'r' ? 0.025 : isTiedOrSlurredFromPrev ? 0.008 : 0.018;
-  const decayTime = 0.08;
+  const isTapR = phoneme.consonant === 'r' && !phoneme.isLongVowel && effectiveDurSec >= 0.08;
+  const attackTime = isTapR ? 0.034 : isTiedOrSlurredFromPrev ? 0.008 : 0.018;
+  const decayTime = 0.06;
   const sustainLevel = 0.88;
+
+  const attackEnd = Math.min(noteReleaseStart - 0.005, voiceStart + attackTime);
+  const sustainStart = Math.max(attackEnd + 0.002, Math.min(noteReleaseStart - 0.002, attackEnd + decayTime));
 
   noteEnvelope.gain.setValueAtTime(0.0001, voiceStart);
   // ら行 ('r') の場合は舌の弾きを再現するため一瞬の軽いディップを入れる
-  if (phoneme.consonant === 'r' && !phoneme.isLongVowel) {
-    noteEnvelope.gain.linearRampToValueAtTime(vocalMasterAmp * 0.45, voiceStart + 0.01);
-    noteEnvelope.gain.linearRampToValueAtTime(vocalMasterAmp * 0.25, voiceStart + 0.018);
-    noteEnvelope.gain.linearRampToValueAtTime(vocalMasterAmp, voiceStart + 0.034);
+  if (isTapR && attackEnd >= voiceStart + 0.034) {
+    noteEnvelope.gain.linearRampToValueAtTime(Math.max(0.001, vocalMasterAmp * 0.45), voiceStart + 0.01);
+    noteEnvelope.gain.linearRampToValueAtTime(Math.max(0.001, vocalMasterAmp * 0.25), voiceStart + 0.018);
+    noteEnvelope.gain.linearRampToValueAtTime(Math.max(0.001, vocalMasterAmp), voiceStart + 0.034);
   } else {
-    noteEnvelope.gain.linearRampToValueAtTime(vocalMasterAmp, voiceStart + attackTime);
+    noteEnvelope.gain.linearRampToValueAtTime(Math.max(0.001, vocalMasterAmp), Math.max(voiceStart + 0.005, attackEnd));
   }
 
-  const sustainStart = Math.min(startAudioTime + effectiveDurSec, voiceStart + attackTime + decayTime);
   noteEnvelope.gain.exponentialRampToValueAtTime(
     Math.max(0.001, vocalMasterAmp * sustainLevel),
     sustainStart
   );
   noteEnvelope.gain.setValueAtTime(
     Math.max(0.001, vocalMasterAmp * sustainLevel),
-    Math.max(sustainStart, startAudioTime + effectiveDurSec - 0.01)
+    Math.max(sustainStart + 0.001, noteReleaseStart)
   );
   noteEnvelope.gain.exponentialRampToValueAtTime(0.00001, stopTime);
 
