@@ -44,6 +44,7 @@ interface ControlBarProps {
   onLoadPreset: (mml: string) => void;
   isExportingMp3: boolean;
   mp3Progress: number;
+  isPreparingVocal?: boolean;
   globalKeyShift?: number;
   onChangeGlobalKeyShift?: (shift: number) => void;
 }
@@ -102,6 +103,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onLoadPreset,
   isExportingMp3,
   mp3Progress,
+  isPreparingVocal = false,
   globalKeyShift = 0,
   onChangeGlobalKeyShift,
 }) => {
@@ -234,6 +236,17 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             <Square className="w-3.5 h-3.5 fill-current" />
           </button>
         </div>
+
+        {/* VOICEVOX 歌声合成プリフェッチ中のステータスバッジ */}
+        {isPreparingVocal && (
+          <div
+            className="flex items-center space-x-1.5 px-2.5 py-0.5 bg-pink-600 text-white rounded text-[11px] font-bold shadow-xs h-7 animate-pulse"
+            title="VOICEVOX サーバーで歌声を合成中です。完了次第、伴奏と歌声を頭から同期再生します"
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+            <span>🎤 VOICEVOX 歌声準備中...</span>
+          </div>
+        )}
 
         {/* タイム表示 & シークスライダー */}
         <div className="flex items-center space-x-1.5">

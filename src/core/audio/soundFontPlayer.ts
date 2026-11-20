@@ -12,6 +12,21 @@ import { voicevoxClient, VoicevoxNoteInput } from './voicevoxClient';
 export interface PlayerCallback {
   onProgress?: (currentTimeSec: number, currentBeat: number, totalDurationSec: number) => void;
   onEnded?: () => void;
+  onVocalPreparing?: (isPreparing: boolean) => void;
+}
+
+interface ResolvedVocalItem {
+  note: NoteEvent;
+  startSec: number;
+  endSec: number;
+  lyric: string;
+  isSlurredFromPrev: boolean;
+}
+
+interface ExtractedVocalTrack {
+  trackId: number;
+  vocalItems: ResolvedVocalItem[];
+  vvInputs: VoicevoxNoteInput[];
 }
 
 interface ScheduledNoteItem {
@@ -36,6 +51,8 @@ export class AudioEngine {
 
   private isPlaying = false;
   private isPaused = false;
+  private isPreparingVocal = false;
+  private playSessionId = 0;
   private startTimeSec = 0;
   private pausedAtSec = 0;
   private currentScore: ParsedScore | null = null;
@@ -312,30 +329,12 @@ export class AudioEngine {
   }
 
   /**
-   * ボーカルノート群を Web Audio フォルマント合成または VOICEVOX Engine でスケジュールする
+   * 楽譜からボーカルノート情報をトラックごとに抽出する
    */
-  private scheduleVocalTracks(score: ParsedScore, startOffsetSec: number) {
-    if (!this.audioCtx) return;
-    const ctx = this.audioCtx;
-    const vocalSettings = vocalSettingsManager.getSettings();
-
-    const vocalMaster = ctx.createGain();
-    vocalMaster.gain.setValueAtTime(0.85, ctx.currentTime);
-    vocalMaster.connect(ctx.destination);
-
-    const shouldTryVoicevox =
-      vocalSettings.engineMode === 'voicevox' ||
-      (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
+  private extractVocalTracksData(score: ParsedScore): ExtractedVocalTrack[] {
+    const result: ExtractedVocalTrack[] = [];
 
     score.tracks.forEach((track) => {
-      interface ResolvedVocalItem {
-        note: NoteEvent;
-        startSec: number;
-        endSec: number;
-        lyric: string;
-        isSlurredFromPrev: boolean;
-      }
-
       const vocalItems: ResolvedVocalItem[] = [];
       let prevWasSlurred = false;
 
@@ -382,8 +381,44 @@ export class AudioEngine {
         prevWasSlurred = Boolean(note.slurGroupId !== undefined && !note.isSlurEnd);
       });
 
-      if (vocalItems.length === 0) return;
+      if (vocalItems.length > 0) {
+        const vvInputs: VoicevoxNoteInput[] = vocalItems.map((it) => ({
+          midiNote: it.note.midiNote,
+          startSec: it.startSec,
+          endSec: it.endSec,
+          lyric: it.lyric,
+        }));
+        result.push({
+          trackId: track.id,
+          vocalItems,
+          vvInputs,
+        });
+      }
+    });
 
+    return result;
+  }
+
+  /**
+   * プリフェッチ済みの VOICEVOX 歌声クリップまたは内蔵フォルマント合成を伴奏と同期スケジュールする
+   */
+  private schedulePreparedVocalTracks(
+    vocalTracksData: ExtractedVocalTrack[],
+    startOffsetSec: number
+  ) {
+    if (!this.audioCtx || vocalTracksData.length === 0) return;
+    const ctx = this.audioCtx;
+    const vocalSettings = vocalSettingsManager.getSettings();
+
+    const vocalMaster = ctx.createGain();
+    vocalMaster.gain.setValueAtTime(0.85, ctx.currentTime);
+    vocalMaster.connect(ctx.destination);
+
+    const shouldTryVoicevox =
+      vocalSettings.engineMode === 'voicevox' ||
+      (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
+
+    vocalTracksData.forEach(({ vocalItems, vvInputs }) => {
       // 内蔵フォルマントシンセでスケジュールする関数
       const scheduleWithFormant = (currentOffsetSec: number) => {
         if (!this.audioCtx || !this.isPlaying) return;
@@ -432,84 +467,58 @@ export class AudioEngine {
       };
 
       if (shouldTryVoicevox) {
-        const vvInputs: VoicevoxNoteInput[] = vocalItems.map((it) => ({
-          midiNote: it.note.midiNote,
-          startSec: it.startSec,
-          endSec: it.endSec,
-          lyric: it.lyric,
-        }));
+        const cachedClip = voicevoxClient.getCachedTrackVocal(vvInputs);
+        if (cachedClip) {
+          const src = ctx.createBufferSource();
+          src.buffer = cachedClip.audioBuffer;
+          const vvGain = ctx.createGain();
+          vvGain.gain.setValueAtTime((vocalSettings.vocalVolume ?? 1.25) * 0.95, ctx.currentTime);
+          src.connect(vvGain);
+          vvGain.connect(ctx.destination);
 
-        voicevoxClient
-          .synthesizeTrackVocal(ctx, vvInputs)
-          .then((clip) => {
-            if (!this.isPlaying || !this.audioCtx) return;
-            const currentPlaySec = this.getCurrentTimeSec();
-            if (!clip) {
-              scheduleWithFormant(currentPlaySec);
-              return;
+          const now = ctx.currentTime;
+          if (cachedClip.startOffsetSec >= startOffsetSec) {
+            const delay = cachedClip.startOffsetSec - startOffsetSec;
+            src.start(now + delay);
+          } else {
+            const bufferOffset = startOffsetSec - cachedClip.startOffsetSec;
+            if (bufferOffset < cachedClip.audioBuffer.duration) {
+              src.start(now, bufferOffset);
             }
+          }
 
-            const src = ctx.createBufferSource();
-            src.buffer = clip.audioBuffer;
-            const vvGain = ctx.createGain();
-            vvGain.gain.setValueAtTime((vocalSettings.vocalVolume ?? 1.25) * 0.95, ctx.currentTime);
-            src.connect(vvGain);
-            vvGain.connect(ctx.destination);
-
-            const now = ctx.currentTime;
-            if (clip.startOffsetSec >= currentPlaySec) {
-              const delay = clip.startOffsetSec - currentPlaySec;
-              src.start(now + delay);
-            } else {
-              const bufferOffset = currentPlaySec - clip.startOffsetSec;
-              if (bufferOffset < clip.audioBuffer.duration) {
-                src.start(now, bufferOffset);
+          this.activeOscillatorNodes.push({
+            stop: (t: number) => {
+              try {
+                src.stop(t);
+                src.disconnect();
+                vvGain.disconnect();
+              } catch {
+                // ignore
               }
-            }
-
-            this.activeOscillatorNodes.push({
-              stop: (t: number) => {
-                try {
-                  src.stop(t);
-                  src.disconnect();
-                  vvGain.disconnect();
-                } catch {
-                  // ignore
-                }
-              },
-            });
-          })
-          .catch(() => {
-            if (this.isPlaying) {
-              scheduleWithFormant(this.getCurrentTimeSec());
-            }
+            },
           });
-      } else {
-        scheduleWithFormant(startOffsetSec);
+          return;
+        }
       }
+
+      // 内蔵フォルマント合成（またはVOICEVOX合成失敗時のフォールバック）
+      scheduleWithFormant(startOffsetSec);
     });
   }
 
   /**
-   * 楽譜の再生を開始
+   * 伴奏と歌声を同一基準時刻から一斉に再生開始する内部メソッド
    */
-  public play(score: ParsedScore, startOffsetSec = 0) {
-    const ctx = this.initAudioContext();
-    this.stop();
-
-    this.currentScore = score;
-    this.buildTempoMap(score);
-    this.isPlaying = true;
-    this.isPaused = false;
-    this.pausedAtSec = startOffsetSec;
-
+  private startActualPlayback(
+    score: ParsedScore,
+    startOffsetSec: number,
+    vocalTracksData: ExtractedVocalTrack[]
+  ) {
+    if (!this.audioCtx || !this.isPlaying) return;
+    const ctx = this.audioCtx;
     const now = ctx.currentTime;
     this.startTimeSec = now - startOffsetSec;
-
-    // もし SoundFont がまだ準備できていなければ裏でロード試行
-    if (!this.isSoundFontReady) {
-      this.initSoundFont();
-    }
 
     this.channelCurrentPrograms.fill(-1);
 
@@ -523,7 +532,6 @@ export class AudioEngine {
 
       // SoundFont チャンネル設定:
       // 再生開始位置以降で各チャンネルが最初に発音する音符の音色を初期音色として設定する
-      // (曲の途中で楽器を変更・復帰していても、再生位置に応じた正しい音色から開始する)
       const initialPrograms = new Map<number, number>();
       this.scheduledNotes.forEach((item) => {
         if (!initialPrograms.has(item.channel)) {
@@ -545,15 +553,70 @@ export class AudioEngine {
       });
 
       this.startSoundFontScheduler();
-      // 歌詞・ボーカルトラックの歌声合成スケジュール
-      this.scheduleVocalTracks(score, startOffsetSec);
+      this.schedulePreparedVocalTracks(vocalTracksData, startOffsetSec);
     } else {
       // SoundFont ロード前はオシレータフォールバックで再生
       this.playOscillatorFallback(score, startOffsetSec);
-      this.scheduleVocalTracks(score, startOffsetSec);
+      this.schedulePreparedVocalTracks(vocalTracksData, startOffsetSec);
     }
 
     this.startProgressLoop();
+  }
+
+  /**
+   * 楽譜の再生を開始
+   * VOICEVOX 連携が有効かつ未キャッシュのボーカルトラックがある場合は、
+   * 伴奏を先に走らせず歌声合成（プリフェッチ）の完了を待ってから頭から同期再生を開始します。
+   */
+  public play(score: ParsedScore, startOffsetSec = 0) {
+    const ctx = this.initAudioContext();
+    this.stop();
+
+    const sessionId = ++this.playSessionId;
+
+    this.currentScore = score;
+    this.buildTempoMap(score);
+    this.isPlaying = true;
+    this.isPaused = false;
+    this.pausedAtSec = startOffsetSec;
+
+    // もし SoundFont がまだ準備できていなければ裏でロード試行
+    if (!this.isSoundFontReady) {
+      this.initSoundFont();
+    }
+
+    const vocalSettings = vocalSettingsManager.getSettings();
+    const shouldTryVoicevox =
+      vocalSettings.engineMode === 'voicevox' ||
+      (vocalSettings.engineMode === 'auto' && voicevoxClient.getConnectionStatus());
+
+    const vocalTracksData = this.extractVocalTracksData(score);
+    const uncachedVocalTracks = shouldTryVoicevox
+      ? vocalTracksData.filter((td) => !voicevoxClient.hasCachedTrackVocal(td.vvInputs))
+      : [];
+
+    if (uncachedVocalTracks.length > 0) {
+      this.isPreparingVocal = true;
+      this.callbacks.onVocalPreparing?.(true);
+
+      Promise.all(
+        uncachedVocalTracks.map((td) => voicevoxClient.synthesizeTrackVocal(ctx, td.vvInputs))
+      )
+        .then(() => {
+          if (this.playSessionId !== sessionId || !this.isPlaying) return;
+          this.isPreparingVocal = false;
+          this.callbacks.onVocalPreparing?.(false);
+          this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+        })
+        .catch(() => {
+          if (this.playSessionId !== sessionId || !this.isPlaying) return;
+          this.isPreparingVocal = false;
+          this.callbacks.onVocalPreparing?.(false);
+          this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+        });
+    } else {
+      this.startActualPlayback(score, startOffsetSec, vocalTracksData);
+    }
   }
 
   /**
@@ -931,6 +994,7 @@ export class AudioEngine {
    */
   public pause() {
     if (!this.isPlaying || this.isPaused || !this.audioCtx) return;
+    this.playSessionId++;
     this.pausedAtSec = this.getCurrentTimeSec();
     this.clearPlayback();
     this.isPlaying = false;
@@ -950,6 +1014,7 @@ export class AudioEngine {
    * 停止
    */
   public stop() {
+    this.playSessionId++;
     this.clearPlayback();
     this.isPlaying = false;
     this.isPaused = false;
@@ -975,7 +1040,7 @@ export class AudioEngine {
   }
 
   public getCurrentTimeSec(): number {
-    if (!this.isPlaying || !this.audioCtx) {
+    if (!this.isPlaying || this.isPreparingVocal || !this.audioCtx) {
       return this.pausedAtSec;
     }
     return Math.max(0, this.audioCtx.currentTime - this.startTimeSec);
@@ -986,6 +1051,10 @@ export class AudioEngine {
   }
 
   private clearPlayback() {
+    if (this.isPreparingVocal) {
+      this.isPreparingVocal = false;
+      this.callbacks.onVocalPreparing?.(false);
+    }
     if (this.schedulerIntervalId) {
       clearInterval(this.schedulerIntervalId);
       this.schedulerIntervalId = null;

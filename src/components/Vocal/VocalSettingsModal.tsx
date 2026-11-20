@@ -328,12 +328,12 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
             </div>
           </div>
 
-          {/* 4. VOICEVOX ローカルAPI連携設定 */}
+          {/* 4. VOICEVOX API連携設定 (ローカルPC / Google Colab等のリモート対応) */}
           <div className="space-y-3 border-t border-slate-200 pt-5">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                 <Mic2 className="w-4 h-4 text-indigo-600" />
-                <span>4. VOICEVOX ローカルAPI連携 (高音質AIボーカル)</span>
+                <span>4. VOICEVOX API連携 (ローカルPC / Google Colabリモート対応)</span>
               </h3>
               {vvConnected ? (
                 <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
@@ -353,7 +353,7 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
                   type="text"
                   value={settings.voicevoxUrl}
                   onChange={(e) => update({ voicevoxUrl: e.target.value })}
-                  placeholder="http://127.0.0.1:50021"
+                  placeholder="http://127.0.0.1:50021 または https://xxxx.trycloudflare.com"
                   className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-mono outline-none focus:border-blue-600"
                   style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
                 />
@@ -364,7 +364,7 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
                   className="flex items-center justify-center space-x-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isCheckingVv ? 'animate-spin' : ''}`} />
-                  <span>{isCheckingVv ? '接続確認中...' : 'VOICEVOX 接続テスト'}</span>
+                  <span>{isCheckingVv ? '接続確認中 (最大15秒)...' : 'VOICEVOX 接続テスト'}</span>
                 </button>
               </div>
 
@@ -403,7 +403,11 @@ export const VocalSettingsModal: React.FC<VocalSettingsModalProps> = ({ isOpen, 
               )}
 
               <div className="text-[11px] text-slate-600 leading-relaxed border-t border-slate-200 pt-2.5">
-                💡 <strong>VOICEVOX で歌わせる手順</strong>: PCで無料の「VOICEVOX」を起動し、上部メニュー「<strong>設定 → オプション → CORS Policy Mode</strong>」を <code>all</code> に設定してから「接続テスト」を押してください。未起動の場合でも内蔵のWeb Audioフォルマント合成でそのまま歌わせることができます。
+                💡 <strong>VOICEVOX 接続手順 (ローカル &amp; Google Colab 対応)</strong>:
+                <br />
+                ・<strong>ローカルPCの場合</strong>: VOICEVOX を起動し、「<strong>設定 → オプション → CORS Policy Mode</strong>」を <code>all</code> にして接続テストを押してください。
+                <br />
+                ・<strong>Google Colab 等のリモートサーバーの場合</strong>: VOICEVOX Engine を <code>--cors_policy_mode all</code> 付きで起動し、Cloudflare Tunnel や ngrok 等の公開URL（<code>https://...</code>）を入力して接続テストを押してください。初回再生時は歌声の合成完了を待ってから伴奏と頭から同期再生されます。
               </div>
             </div>
           </div>

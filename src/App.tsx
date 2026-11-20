@@ -58,6 +58,7 @@ export const App: React.FC = () => {
   // 再生状態
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isPreparingVocal, setIsPreparingVocal] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [currentBeat, setCurrentBeat] = useState(0);
   const [totalDurationSec, setTotalDurationSec] = useState(0);
@@ -104,6 +105,10 @@ export const App: React.FC = () => {
       onEnded: () => {
         setIsPlaying(false);
         setIsPaused(false);
+        setIsPreparingVocal(false);
+      },
+      onVocalPreparing: (preparing) => {
+        setIsPreparingVocal(preparing);
       },
     });
   }, []);
@@ -507,6 +512,7 @@ export const App: React.FC = () => {
         onLoadPreset={handleLoadPreset}
         isExportingMp3={isExportingMp3}
         mp3Progress={mp3Progress}
+        isPreparingVocal={isPreparingVocal}
         globalKeyShift={globalKeyShift}
         onChangeGlobalKeyShift={handleKeyShiftChange}
       />

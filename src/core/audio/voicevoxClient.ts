@@ -47,7 +47,7 @@ class VoicevoxClient {
   }
 
   /**
-   * VOICEVOX ローカルサーバーへの疎通確認とシンガー一覧取得
+   * VOICEVOX サーバー（ローカルPC / Google Colab等のリモートサーバー）への疎通確認とシンガー一覧取得
    */
   public async checkConnection(customUrl?: string): Promise<{
     ok: boolean;
@@ -57,7 +57,8 @@ class VoicevoxClient {
     const baseUrl = (customUrl || vocalSettingsManager.getSettings().voicevoxUrl).replace(/\/+$/, '');
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
+      // Google Colab やリモートトンネル経由の初回コールドスタートにも対応できるよう 15秒 (15000ms) に設定
+      const timeout = setTimeout(() => controller.abort(), 15000);
 
       const res = await fetch(`${baseUrl}/singers`, {
         method: 'GET',
@@ -70,7 +71,7 @@ class VoicevoxClient {
         return {
           ok: false,
           singers: [],
-          error: `VOICEVOX からエラー応答が返されました (HTTP ${res.status})`,
+          error: `VOICEVOX サーバーからエラー応答が返されました (HTTP ${res.status})。URLまたはサーバーの起動状態を確認してください。`,
         };
       }
 
@@ -90,11 +91,13 @@ class VoicevoxClient {
       return { ok: true, singers: this.singers };
     } catch (err: any) {
       this.isConnected = false;
+      const isTimeout = err?.name === 'AbortError';
       return {
         ok: false,
         singers: [],
-        error:
-          'VOICEVOX に接続できませんでした。PCで VOICEVOX が起動していること、および VOICEVOX の「設定 → オプション → CORS Policy Mode」が「all」になっていることを確認してください。',
+        error: isTimeout
+          ? 'VOICEVOX サーバーへの接続がタイムアウト（15秒）しました。Google Colab 等のリモートサーバーやローカルの VOICEVOX が起動完了しているか、URLが正しいか確認してください。'
+          : 'VOICEVOX サーバーに接続できませんでした。①ローカルPCの場合は VOICEVOX が起動しており「設定 → オプション → CORS Policy Mode」が「all」になっていること、②Google Colab 等のリモートサーバーの場合は公開URL（https://...）が有効で CORS が許可（--cors_policy_mode all）されていることを確認してください。',
       };
     }
   }
@@ -107,6 +110,33 @@ class VoicevoxClient {
       .map((n) => `${n.midiNote}:${n.startSec.toFixed(3)}-${n.endSec.toFixed(3)}:${n.lyric}`)
       .join('|');
     return `spk${speakerId}__${body}`;
+  }
+
+  /**
+   * 指定したボーカルノート配列の合成結果がすでにキャッシュされているか判定する
+   */
+  public hasCachedTrackVocal(vocalNotes: VoicevoxNoteInput[], speakerId?: number): boolean {
+    if (vocalNotes.length === 0) return true;
+    const settings = vocalSettingsManager.getSettings();
+    const targetSpeaker = speakerId ?? settings.voicevoxSpeakerId ?? 6000;
+    const sorted = [...vocalNotes].sort((a, b) => a.startSec - b.startSec);
+    const cacheKey = this.buildCacheKey(sorted, targetSpeaker);
+    return this.clipCache.has(cacheKey);
+  }
+
+  /**
+   * キャッシュ済みの歌声クリップがあれば同期的に取得する
+   */
+  public getCachedTrackVocal(
+    vocalNotes: VoicevoxNoteInput[],
+    speakerId?: number
+  ): RenderedVocalClip | undefined {
+    if (vocalNotes.length === 0) return undefined;
+    const settings = vocalSettingsManager.getSettings();
+    const targetSpeaker = speakerId ?? settings.voicevoxSpeakerId ?? 6000;
+    const sorted = [...vocalNotes].sort((a, b) => a.startSec - b.startSec);
+    const cacheKey = this.buildCacheKey(sorted, targetSpeaker);
+    return this.clipCache.get(cacheKey);
   }
 
   /**
